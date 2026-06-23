@@ -1,259 +1,119 @@
-name: CI - Advanced Theos Build Pipeline
+name: CI - Jailed Dylib Build (Fishhook)
 
 on:
   push:
-    branches: [ "main", "master", "develop" ]
-  pull_request:
-    branches: [ "main", "master", "develop" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
+env:
+  THEOS: ${{ github.workspace }}/theos
+  SDKS: ${{ github.workspace }}/theos/sdks
+
 jobs:
-  build_tweak:
-    name: Build Tweak Package
-    runs-on: macos-latest
-    timeout-minutes: 120
+  build_dylib:
+    name: Build Jailed Dylib
+    runs-on: macos-14
+    timeout-minutes: 60
 
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
-        fetch-depth: 0
 
     - name: Setup Environment
       run: |
-        echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-        echo "SDKS=$GITHUB_WORKSPACE/theos/sdks" >> $GITHUB_ENV
-        echo "PATH=/opt/homebrew/opt/make/libexec/gnubin:$GITHUB_WORKSPACE/theos/bin:$PATH" >> $GITHUB_ENV
-
-    - name: Install GNU Make
-      run: |
-        brew install make parallel xz
+        echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
+        echo "SDKS=${{ github.workspace }}/theos/sdks" >> $GITHUB_ENV
         echo "MAKEFLAGS=-j$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
-
-    - name: Cache Theos
-      id: cache-theos
-      uses: actions/cache@v4
-      with:
-        path: ${{ github.workspace }}/theos
-        key: ${{ runner.os }}-theos-complete-v4
-
-    - name: Install Theos
-      if: steps.cache-theos.outputs.cache-hit != 'true'
-      run: |
-        rm -rf "$THEOS"
-        git clone --recursive https://github.com/theos/theos.git "$THEOS"
-
-    - name: Create SDKs Directory
-      run: |
-        mkdir -p "$SDKS"
-        rm -rf "$SDKS"/*
-
-    - name: Download SDK from Releases
-      id: download-sdk
-      continue-on-error: true
-      run: |
-        cd "$SDKS"
-        echo "Attempting to download SDK..."
-        curl -L -k --insecure --retry 5 --retry-delay 3 --connect-timeout 30 -o iOS14.sdk.tar "https://github.com/theos/sdks/releases/download/latest/iPhoneOS14.0.sdk.tar" 2>&1 | tail -20
-        if [ -f "iOS14.sdk.tar" ] && [ $(stat -f%z "iOS14.sdk.tar") -gt 1000000 ]; then
-          echo "SDK downloaded successfully"
-          tar -xf iOS14.sdk.tar
-          rm iOS14.sdk.tar
-          echo "success=true" >> $GITHUB_OUTPUT
-          ls -la
-        else
-          echo "Download failed or file too small"
-          rm -f iOS14.sdk.tar
-          exit 1
-        fi
-
-    - name: Create Minimal SDK
-      if: steps.download-sdk.outputs.success != 'true'
-      run: |
-        echo "Creating minimal SDK structure..."
-        mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/include"
-        mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/lib"
-        mkdir -p "$SDKS/iPhoneOS14.0.sdk/System/Library/Frameworks"
-        cat > "$SDKS/iPhoneOS14.0.sdk/SDKSettings.json" << 'SDKEOF'
-        {
-          "Version": "14.0",
-          "DisplayName": "iOS 14.0",
-          "MinimumDeploymentTarget": "14.0"
-        }
-        SDKEOF
-        ls -la "$SDKS/iPhoneOS14.0.sdk/"
 
     - name: Install Dependencies
       run: |
-        brew install dpkg fakeroot ldid llvm git
+        brew install make xz llvm
+        mkdir -p $HOME/.local/bin
+        ln -s $(which gmake) $HOME/.local/bin/make
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-    - name: Detect Project Structure
+    - name: Install Theos & SDK (iOS 14.5)
       run: |
-        echo "=== Repository Structure ==="
-        find . -maxdepth 3 -type f \( -name "*.xm" -o -name "*.x" -o -name "*.m" -o -name "Makefile" -o -name "*.plist" \) 2>/dev/null | head -30
-        echo ""
-        echo "=== Directory Listing ==="
-        ls -la
+        git clone --depth=1 --recursive https://github.com/theos/theos.git "$THEOS"
+        mkdir -p "$SDKS"
+        cd "$SDKS"
+        curl -L -k -s -o SDK.tar.xz "https://github.com/xybp888/iOS-SDKs/releases/download/14.5/iPhoneOS14.5.sdk.tar.xz"
+        xz -d SDK.tar.xz
+        tar -xf SDK.tar
+        rm -f SDK.tar
 
-    - name: Verify and Create Required Files
+    - name: Download Fishhook
       run: |
-        echo "Checking for required source files..."
-        if [ ! -f "Tweak.xm" ]; then
-          echo "⚠️  Tweak.xm not found - creating minimal tweak..."
-          cat > Tweak.xm << 'TWEAKEOF'
-        %hook NSBundle
-        - (NSString *)bundleIdentifier {
-          NSString *identifier = %orig;
-          return identifier;
-        }
-        %end
-        TWEAKEOF
-        fi
-        
-        if [ ! -f "Makefile" ]; then
-          echo "⚠️  Makefile not found - creating default..."
-          cat > Makefile << 'MAKEEOF'
-        ARCHS = arm64
-        TARGET = iphone:clang:14.0:14.0
-        
-        include $(THEOS)/makefiles/common.mk
-        
-        TWEAK_NAME = ShadowTrackerBypass
-        
-        ShadowTrackerBypass_FILES = Tweak.xm
-        ShadowTrackerBypass_CFLAGS = -fobjc-arc
-        
-        include $(THEOS_MAKE_PATH)/tweak.mk
-        MAKEEOF
-        fi
-        
-        if [ ! -d "DEBIAN" ]; then
-          echo "⚠️  DEBIAN directory not found - creating..."
-          mkdir -p DEBIAN
-          cat > DEBIAN/control << 'CTRLEOF'
-        Package: com.example.shadowtracker
-        Name: ShadowTrackerBypass
-        Depends: mobilesubstrate
-        Version: 1.0.0
-        Architecture: iphoneos-arm
-        Description: ShadowTrackerBypass Tweak
-        Maintainer: Developer
-        Author: Developer
-        CTRLEOF
-        fi
-        
-        echo "✓ Required files verified"
-        echo ""
-        echo "=== Tweak.xm ===" && head -3 Tweak.xm
-        echo ""
-        echo "=== Makefile ===" && head -5 Makefile
+        echo "=== Downloading Fishhook ==="
+        curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.c
+        curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.h
 
-    - name: Clean Build
+    - name: Generate Source Files
       run: |
-        make clean THEOS="$THEOS" 2>/dev/null || true
-        rm -rf packages/ build/ .theos/
+        echo "=== Creating Main.m (Fishhook Example) ==="
+        cat > Main.m << 'MAINEOF'
+#import <Foundation/Foundation.h>
+#import <dlfcn.h>
+#import "fishhook.h"
 
-    - name: Build Project
-      continue-on-error: true
+// 1. تعريف مؤشر للدالة الأصلية
+static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+
+// 2. كتابة الدالة المعدلة الخاصة بنا
+int my_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    if (strcmp(name, "hw.machine") == 0) {
+        // يمكنك تعديل الاستجابة هنا (مثلاً تخطي فحص الأجهزة)
+        NSLog(@"[ShadowTracker] Intercepted sysctlbyname for: %s", name);
+    }
+    return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+}
+
+// 3. دالة البناء (تعمل تلقائياً عند حقن المكتبة في التطبيق)
+__attribute__((constructor)) static void init_bypass() {
+    NSLog(@"[ShadowTracker] Dylib Loaded successfully!");
+    
+    // ربط الدالة الأصلية بالدالة المعدلة باستخدام Fishhook
+    struct rebinding rebindings[] = {
+        {"sysctlbyname", my_sysctlbyname, (void *)&orig_sysctlbyname}
+    };
+    
+    rebind_symbols(rebindings, 1);
+}
+MAINEOF
+
+        echo "=== Creating Makefile for Dylib ==="
+        cat > Makefile << 'MAKEEOF'
+ARCHS = arm64
+TARGET = iphone:clang:14.5:14.0
+
+include $(THEOS)/makefiles/common.mk
+
+# استخدمنا LIBRARY بدلاً من TWEAK لمنع ارتباط المكتبة بـ Substrate
+LIBRARY_NAME = ShadowTracker
+ShadowTracker_FILES = Main.m fishhook.c
+ShadowTracker_CFLAGS = -fobjc-arc -Wno-everything
+ShadowTracker_FRAMEWORKS = Foundation
+
+include $(THEOS_MAKE_PATH)/library.mk
+MAKEEOF
+
+    - name: Compile Dylib
       run: |
-        export THEOS="$THEOS"
-        export SDKS="$SDKS"
-        export PATH="/opt/homebrew/opt/make/libexec/gnubin:$PATH"
-        echo "Building with Makefile..."
-        make package FINALPACKAGE=1 -j$(sysctl -n hw.ncpu) || make package FINALPACKAGE=1
+        make clean
+        make
 
-    - name: Check for Build Output
+    - name: Collect Dylib Artifact
       run: |
-        echo "Searching for build artifacts..."
-        echo ""
-        echo "=== .deb files ==="
-        find . -type f -name "*.deb" -exec ls -lh {} \; 2>/dev/null || echo "No .deb files found"
-        echo ""
-        echo "=== packages directory ==="
-        ls -la packages/ 2>/dev/null || echo "packages/ directory not found"
-        echo ""
-        echo "=== .theos directory ==="
-        ls -la .theos/obj/debug/ 2>/dev/null || echo ".theos/obj/debug/ not found"
+        mkdir -p output_dylib
+        # البحث عن ملف الـ dylib ونقله لمجلد المخرجات
+        find .theos/obj -type f -name "*.dylib" -exec cp -v {} output_dylib/ \;
+        
+        echo "=== Output Content ==="
+        ls -la output_dylib/
 
-    - name: Find and Copy Artifacts
-      if: always()
-      run: |
-        mkdir -p $GITHUB_WORKSPACE/artifacts
-        
-        echo "Finding all build outputs..."
-        find . -type f -name "*.deb" -exec cp {} $GITHUB_WORKSPACE/artifacts/ \; 2>/dev/null
-        find . -type f -name "*.zip" -exec cp {} $GITHUB_WORKSPACE/artifacts/ \; 2>/dev/null
-        
-        if [ -d "packages" ]; then
-          cp -r packages/* $GITHUB_WORKSPACE/artifacts/ 2>/dev/null || true
-        fi
-        
-        echo "=== Artifacts collected ==="
-        ls -lah $GITHUB_WORKSPACE/artifacts/
-
-    - name: Upload Artifacts
-      if: always()
+    - name: Upload Dylib to GitHub
       uses: actions/upload-artifact@v4
       with:
-        name: Build-Output
-        path: ${{ github.workspace }}/artifacts/
-        retention-days: 30
-        if-no-files-found: warn
-
-    - name: Create Release (if artifacts exist)
-      if: always()
-      run: |
-        ARTIFACT_COUNT=$(find $GITHUB_WORKSPACE/artifacts -type f | wc -l)
-        
-        if [ $ARTIFACT_COUNT -gt 0 ]; then
-          echo "Found $ARTIFACT_COUNT artifact(s). Ready for release."
-          ls Release (Manual)
-      if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: actions/create-release@v1
-      continue-on-error: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: build-${{ github.run_number }}
-        release_name: Build ${{ github.run_number }}
-        draft: false
-        prerelease: false
-
-    - name: Upload Release Assets
-      if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-      continue-on-error: true
-      run: |
-        RELEASE_ID=$(gh release list --json id --jq '.[0].id' 2>/dev/null || echo "")
-        
-        if [ -z "$RELEASE_ID" ]; then
-          echo "Could not find release, creating one..."
-          gh release create "build-${{ github.run_number }}" --draft=false 2>/dev/null || true
-        fi
-        
-        for file in $GITHUB_WORKSPACE/artifacts/*; do
-          if [ -f "$file" ]; then
-            echo "Uploading $(basename $file)..."
-            gh release upload "build-${{ github.run_number }}" "$file" --clobber 2>/dev/null || true
-          fi
-        done
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Build Summary
-      if: always()
-      run: |
-        echo "============================================"
-        echo "BUILD SUMMARY"
-        echo "============================================"
-        echo "Status: ${{ job.status }}"
-        echo "Branch: ${{ github.ref }}"
-        echo "Run: ${{ github.run_number }}"
-        echo ""
-        echo "=== Final Artifacts ==="
-        if [ -d "$GITHUB_WORKSPACE/artifacts" ]; then
-          ls -lah $GITHUB_WORKSPACE/artifacts/ || echo "No artifacts"
-        else
-          echo "No artifacts directory"
-        fi
-        echo "============================================"
+        name: ShadowTracker-Jailed-Dylib-${{ github.run_number }}
+        path: output_dylib/
+        retention-days: 14
