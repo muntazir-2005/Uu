@@ -55,9 +55,7 @@ jobs:
       run: |
         cd "$SDKS"
         echo "Attempting to download SDK..."
-        
         curl -L -k --insecure --retry 5 --retry-delay 3 --connect-timeout 30 -o iOS14.sdk.tar "https://github.com/theos/sdks/releases/download/latest/iPhoneOS14.0.sdk.tar" 2>&1 | tail -20
-        
         if [ -f "iOS14.sdk.tar" ] && [ $(stat -f%z "iOS14.sdk.tar") -gt 1000000 ]; then
           echo "SDK downloaded successfully"
           tar -xf iOS14.sdk.tar
@@ -77,15 +75,13 @@ jobs:
         mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/include"
         mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/lib"
         mkdir -p "$SDKS/iPhoneOS14.0.sdk/System/Library/Frameworks"
-        
-        cat > "$SDKS/iPhoneOS14.0.sdk/SDKSettings.json" << 'EOF'
-{
-  "Version": "14.0",
-  "DisplayName": "iOS 14.0",
-  "MinimumDeploymentTarget": "14.0"
-}
-EOF
-        
+        cat > "$SDKS/iPhoneOS14.0.sdk/SDKSettings.json" << 'SDKEOF'
+        {
+          "Version": "14.0",
+          "DisplayName": "iOS 14.0",
+          "MinimumDeploymentTarget": "14.0"
+        }
+        SDKEOF
         ls -la "$SDKS/iPhoneOS14.0.sdk/"
 
     - name: Install Dependencies
@@ -111,7 +107,6 @@ EOF
         export THEOS="$THEOS"
         export SDKS="$SDKS"
         export PATH="/opt/homebrew/opt/make/libexec/gnubin:$PATH"
-        
         if [ -f "Makefile" ]; then
           echo "Building with existing Makefile..."
           make package FINALPACKAGE=1 || true
@@ -132,9 +127,7 @@ EOF
       run: |
         export THEOS="$THEOS"
         export SDKS="$SDKS"
-        
         echo "Attempting alternative build..."
-        
         if [ -f "Makefile" ]; then
           cat Makefile
           echo ""
@@ -147,11 +140,9 @@ EOF
       run: |
         echo "=== All .deb files ==="
         find . -name "*.deb" -type f -exec ls -lh {} \; 2>/dev/null || echo "No .deb files found"
-        
         echo ""
         echo "=== All .zip files ==="
         find . -name "*.zip" -type f -exec ls -lh {} \; 2>/dev/null || echo "No .zip files found"
-        
         echo ""
         echo "=== Build Directory Contents ==="
         if [ -d ".theos" ]; then
