@@ -22,22 +22,13 @@ jobs:
       run: |
         echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
 
-    - name: Cache Theos
-      id: cache-theos
-      uses: actions/cache@v4
-      with:
-        path: ${{ github.workspace }}/theos
-        key: ${{ runner.os }}-theos-v4
-
-    - name: Install Theos & SDKs
-      if: steps.cache-theos.outputs.cache-hit != 'true'
+    - name: Install Theos
       run: |
         git clone --recursive https://github.com/theos/theos.git $THEOS
-        git clone --depth=1 https://github.com/theos/sdks.git $THEOS/sdks
-
-    - name: Verify SDK
+        
+    - name: Verify Theos Installation
       run: |
-        ls -la $THEOS/sdks/
+        ls -la $THEOS/
 
     - name: Compile and Package
       run: |
