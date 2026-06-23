@@ -1,0 +1,61 @@
+name: CI - Advanced Theos Build Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # يتيح لك تشغيل البناء يدويًا من موقع GitHub
+
+jobs:
+  build_tweak:
+    name: Build Tweak Package
+    runs-on: macos-14 # استخدام بيئات Apple Silicon الحديثة لتسريع المعالجة
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive # جلب الملفات الفرعية تلقائيًا مثل fishhook إن وجدت
+
+    - name: Setup Environment Variables
+      run: |
+        echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+        echo "THEOS_DEVICE_IP=127.0.0.1" >> $GITHUB_ENV
+
+    - name: Cache Theos Toolchain & SDKs
+      id: cache-theos
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/theos
+        key: ${{ runner.os }}-theos-v1-ios14.5
+
+    - name: Install Theos Framework & SDK
+      if: steps.cache-theos.outputs.cache-hit != 'true'
+      run: |
+        # تحميل مستودع Theos بشكل كامل وعميق
+        git clone --recursive https://github.com/theos/theos.git $THEOS
+        
+        # تحميل الـ SDK المطلوبة (تتوافق مع المتطلبات المذكورة في الـ Makefile الخاص بك)
+        curl -LO https://github.com/theos/sdks/raw/master/iPhoneOS14.5.sdk.tar.xz
+        tar -xf iPhoneOS14.5.sdk.tar.xz -C $THEOS/sdks/
+        rm iPhoneOS14.5.sdk.tar.xz
+
+    - name: Verify Build Dependencies
+      run: |
+        echo "Checking Theos installation..."
+        ls -la $THEOS/sdks/
+
+    - name: Compile and Package Tweak
+      run: |
+        # تفعيل خيار FINALPACKAGE لإنتاج نسخة نهائية نظيفة ومحسنة
+        make package FINALPACKAGE=1
+      env:
+        THEOS: ${{ github.workspace }}/theos
+
+    - name: Archive Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ShadowTrackerBypass-Package
+        path: packages/*.deb
+        if-no-files-found: error
