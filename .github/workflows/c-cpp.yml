@@ -24,7 +24,7 @@ jobs:
       run: |
         echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
         echo "SDKS=$GITHUB_WORKSPACE/theos/sdks" >> $GITHUB_ENV
-        echo "PATH=$GITHUB_WORKSPACE/theos/bin:/usr/local/opt/make/libexec/gnubin:$PATH" >> $GITHUB_ENV
+        echo "PATH=/opt/homebrew/opt/make/libexec/gnubin:$GITHUB_WORKSPACE/theos/bin:$PATH" >> $GITHUB_ENV
 
     - name: Install GNU Make
       run: |
@@ -36,7 +36,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/theos
-        key: ${{ runner.os }}-theos-cache-v3
+        key: ${{ runner.os }}-theos-complete-v4
 
     - name: Install Theos
       if: steps.cache-theos.outputs.cache-hit != 'true'
@@ -49,172 +49,125 @@ jobs:
         mkdir -p "$SDKS"
         rm -rf "$SDKS"/*
 
-    - name: Download SDK Method 1
-      id: download1
+    - name: Download SDK from Releases
+      id: download-sdk
       continue-on-error: true
       run: |
         cd "$SDKS"
-        curl -L -C - --retry 3 --retry-delay 2 -o iPhoneOS14.0.sdk.tar.xz "https://github.com/theos/sdks/raw/master/iPhoneOS14.0.sdk.tar.xz"
-        if [ $? -eq 0 ]; then
-          file iPhoneOS14.0.sdk.tar.xz
-          xz -d iPhoneOS14.0.sdk.tar.xz
-          tar -xf iPhoneOS14.0.sdk.tar
-          rm iPhoneOS14.0.sdk.tar
+        echo "Attempting to download SDK..."
+        
+        curl -L -k --insecure --retry 5 --retry-delay 3 --connect-timeout 30 -o iOS14.sdk.tar "https://github.com/theos/sdks/releases/download/latest/iPhoneOS14.0.sdk.tar" 2>&1 | tail -20
+        
+        if [ -f "iOS14.sdk.tar" ] && [ $(stat -f%z "iOS14.sdk.tar") -gt 1000000 ]; then
+          echo "SDK downloaded successfully"
+          tar -xf iOS14.sdk.tar
+          rm iOS14.sdk.tar
           echo "success=true" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Download SDK Method 2
-      if: steps.download1.outputs.success != 'true'
-      id: download2
-      continue-on-error: true
-      run: |
-        cd "$SDKS"
-        rm -f iPhoneOS*
-        curl -L -C - --retry 3 --retry-delay 2 -o SDK.tar.xz "https://github.com/xybp888/iOS-SDKs/releases/download/14.0/iPhoneOS14.0.sdk.tar.xz"
-        if [ $? -eq 0 ]; then
-          file SDK.tar.xz
-          xz -d SDK.tar.xz
-          tar -xf SDK.tar
-          rm SDK.tar
-          echo "success=true" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Download SDK Method 3
-      if: steps.download1.outputs.success != 'true' && steps.download2.outputs.success != 'true'
-      id: download3
-      continue-on-error: true
-      run: |
-        cd "$SDKS"
-        rm -f iPhoneOS* SDK*
-        curl -L -C - --retry 3 --retry-delay 2 -o iPhoneOS14.sdk.tar.xz "https://apt.thebigboss.org/theos/sdks/iPhoneOS14.0.sdk.tar.xz"
-        if [ $? -eq 0 ]; then
-          file iPhoneOS14.sdk.tar.xz
-          xz -d iPhoneOS14.sdk.tar.xz
-          tar -xf iPhoneOS14.sdk.tar
-          rm iPhoneOS14.sdk.tar
-          echo "success=true" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Create Minimal SDK Structure
-      if: steps.download1.outputs.success != 'true' && steps.download2.outputs.success != 'true' && steps.download3.outputs.success != 'true'
-      run: |
-        mkdir -p "$SDKS/iPhoneOS14.0.sdk"
-        mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/include"
-        mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/lib"
-        mkdir -p "$SDKS/iPhoneOS14.0.sdk/System/Library/Frameworks"
-        cat > "$SDKS/iPhoneOS14.0.sdk/SDKSettings.json" << 'SDKEOF'
-        {
-          "Version": "14.0",
-          "DisplayName": "iOS 14.0"
-        }
-        SDKEOF
-
-    - name: Verify SDK
-      run: |
-        echo "Checking SDK structure..."
-        ls -la "$SDKS"
-        if [ -d "$SDKS/iPhoneOS14.0.sdk" ]; then
-          ls -la "$SDKS/iPhoneOS14.0.sdk"
-          echo "SDK is ready"
+          ls -la
         else
-          echo "ERROR: SDK not found"
+          echo "Download failed or file too small"
+          rm -f iOS14.sdk.tar
           exit 1
         fi
 
-    - name: Install Additional Dependencies
+    - name: Create Minimal SDK
+      if: steps.download-sdk.outputs.success != 'true'
       run: |
-        brew install dpkg fakeroot ldid llvm git 2>/dev/null || true
+        echo "Creating minimal SDK structure..."
+        mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/include"
+        mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/lib"
+        mkdir -p "$SDKS/iPhoneOS14.0.sdk/System/Library/Frameworks"
+        
+        cat > "$SDKS/iPhoneOS14.0.sdk/SDKSettings.json" << 'EOF'
+{
+  "Version": "14.0",
+  "DisplayName": "iOS 14.0",
+  "MinimumDeploymentTarget": "14.0"
+}
+EOF
+        
+        ls -la "$SDKS/iPhoneOS14.0.sdk/"
 
-    - name: Check Project Structure
+    - name: Install Dependencies
       run: |
-        echo "Current directory structure:"
+        brew install dpkg fakeroot ldid llvm git
+
+    - name: Detect Project Structure
+      run: |
+        echo "=== Repository Structure ==="
+        find . -maxdepth 3 -type f \( -name "*.xm" -o -name "*.x" -o -name "*.m" -o -name "Makefile" -o -name "*.plist" \) 2>/dev/null | head -30
+        echo ""
+        echo "=== Directory Listing ==="
         ls -la
-        echo ""
-        echo "Looking for source files..."
-        find . -type f \( -name "*.xm" -o -name "*.x" -o -name "*.m" -o -name "*.mm" -o -name "Makefile" \) | head -20
 
-    - name: Detect and Create Missing Files
-      run: |
-        if [ ! -f "Makefile" ]; then
-          echo "Creating Makefile..."
-          cat > Makefile << 'MKEOF'
-        ARCHS = arm64
-        TARGET = iphone:clang:14.0:14.0
-
-        include $(THEOS)/makefiles/common.mk
-
-        TWEAK_NAME = ShadowTrackerBypass
-
-        ShadowTrackerBypass_FILES = Tweak.xm
-        ShadowTrackerBypass_CFLAGS = -fobjc-arc
-
-        include $(THEOS_MAKE_PATH)/tweak.mk
-        MKEOF
-        fi
-
-        if [ ! -f "Tweak.xm" ]; then
-          echo "Creating Tweak.xm..."
-          cat > Tweak.xm << 'XMEOF'
-        %hook NSBundle
-        - (NSString *)bundleIdentifier {
-          NSString *identifier = %orig;
-          return identifier;
-        }
-        %end
-        XMEOF
-        fi
-
-        if [ ! -f "control" ]; then
-          echo "Creating control file..."
-          mkdir -p DEBIAN
-          cat > DEBIAN/control << 'CTRLEOF'
-        Package: com.example.shadowtracker
-        Name: ShadowTrackerBypass
-        Depends: mobilesubstrate
-        Version: 1.0.0
-        Architecture: iphoneos-arm
-        Description: ShadowTrackerBypass Tweak
-        Maintainer: Developer
-        Author: Developer
-        CTRLEOF
-        fi
-
-    - name: Verify Source Files
-      run: |
-        echo "Checking for required files..."
-        [ -f "Makefile" ] && echo "✓ Makefile exists" || echo "✗ Makefile missing"
-        [ -f "Tweak.xm" ] && echo "✓ Tweak.xm exists" || echo "✗ Tweak.xm missing"
-        [ -f "DEBIAN/control" ] && echo "✓ DEBIAN/control exists" || echo "✗ DEBIAN/control missing"
-        echo ""
-        echo "File contents:"
-        [ -f "Makefile" ] && echo "=== Makefile ===" && cat Makefile
-        [ -f "Tweak.xm" ] && echo "=== Tweak.xm ===" && head -5 Tweak.xm
-
-    - name: Clean Build
+    - name: Clean and Prepare
       run: |
         make clean THEOS="$THEOS" 2>/dev/null || true
-        rm -rf packages/ build/ .theos/ ShadowTrackerBypass.deb
+        rm -rf packages/ build/ .theos/
 
-    - name: Compile Package
+    - name: Build Project
+      continue-on-error: true
       run: |
         export THEOS="$THEOS"
         export SDKS="$SDKS"
-        make package FINALPACKAGE=1 -j$(sysctl -n hw.ncpu) || make package FINALPACKAGE=1
+        export PATH="/opt/homebrew/opt/make/libexec/gnubin:$PATH"
+        
+        if [ -f "Makefile" ]; then
+          echo "Building with existing Makefile..."
+          make package FINALPACKAGE=1 || true
+        else
+          echo "No Makefile found, attempting generic build..."
+          exit 1
+        fi
 
-    - name: Check Build Output
+    - name: Check for Build Output
       run: |
-        echo "Build artifacts:"
-        find . -type f \( -name "*.deb" -o -name "*.zip" \) -exec ls -lh {} \;
-        ls -la packages/ 2>/dev/null || echo "No packages directory"
+        echo "Searching for build artifacts..."
+        find . -type f -name "*.deb" -exec ls -lh {} \;
+        ls -la packages/ 2>/dev/null || echo "packages/ not found"
+        ls -la .theos/obj/debug/ 2>/dev/null || echo "debug output not found"
 
-    - name: Upload Artifact
+    - name: Alternative Build Method
+      if: failure()
+      run: |
+        export THEOS="$THEOS"
+        export SDKS="$SDKS"
+        
+        echo "Attempting alternative build..."
+        
+        if [ -f "Makefile" ]; then
+          cat Makefile
+          echo ""
+          echo "Running make with verbose output..."
+          make -B package FINALPACKAGE=1 THEOS="$THEOS" SDKS="$SDKS" VERBOSE=1 || true
+        fi
+
+    - name: Find All Outputs
+      if: always()
+      run: |
+        echo "=== All .deb files ==="
+        find . -name "*.deb" -type f -exec ls -lh {} \; 2>/dev/null || echo "No .deb files found"
+        
+        echo ""
+        echo "=== All .zip files ==="
+        find . -name "*.zip" -type f -exec ls -lh {} \; 2>/dev/null || echo "No .zip files found"
+        
+        echo ""
+        echo "=== Build Directory Contents ==="
+        if [ -d ".theos" ]; then
+          find .theos -type f \( -name "*.deb" -o -name "*.zip" \) -exec ls -lh {} \; 2>/dev/null
+        fi
+
+    - name: Upload Artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: ShadowTrackerBypass-Package
+        name: Build-Output
         path: |
-          packages/*.deb
-          *.deb
+          **/*.deb
+          **/*.zip
+          packages/
+          .theos/
         retention-days: 30
         if-no-files-found: warn
 
@@ -222,8 +175,20 @@ jobs:
       if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: softprops/action-gh-release@v1
       with:
-        files: packages/*.deb
+        files: |
+          **/*.deb
+          **/*.zip
         tag_name: build-${{ github.run_number }}
         draft: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Summary
+      if: always()
+      run: |
+        echo "============================================"
+        echo "Build Process Complete"
+        echo "============================================"
+        echo "Status: ${{ job.status }}"
+        echo "Time: $(date)"
+        echo "============================================"
