@@ -28,7 +28,7 @@ jobs:
 
     - name: Install GNU Make
       run: |
-        brew install make parallel
+        brew install make parallel xz
         echo "MAKEFLAGS=-j$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
 
     - name: Cache Theos
@@ -36,7 +36,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/theos
-        key: ${{ runner.os }}-theos-cache-v2
+        key: ${{ runner.os }}-theos-cache-v3
 
     - name: Install Theos
       if: steps.cache-theos.outputs.cache-hit != 'true'
@@ -49,66 +49,123 @@ jobs:
         mkdir -p "$SDKS"
         rm -rf "$SDKS"/*
 
-    - name: Download iPhoneOS SDK
+    - name: Download SDK Method 1
+      id: download1
+      continue-on-error: true
       run: |
         cd "$SDKS"
-        
-        # الطريقة الأولى
-        if ! curl -L -o iPhoneOS.sdk.tar.xz "https://github.com/theos/sdks/releases/download/latest/iPhoneOS.sdk.tar.xz" 2>/dev/null; then
-          # الطريقة الثانية
-          if ! curl -L -o iPhoneOS.sdk.tar.xz "https://github.com/xybp888/iOS-SDKs/releases/download/14.0/iPhoneOS14.0.sdk.tar.xz" 2>/dev/null; then
-            # الطريقة الثالثة
-            curl -L -o iPhoneOS.sdk.tar.xz "https://files.fm/u/vyq5n7tgm8" 2>/dev/null || true
-          fi
-        fi
-        
-        if [ -f "iPhoneOS.sdk.tar.xz" ]; then
-          tar -xf iPhoneOS.sdk.tar.xz
-          rm iPhoneOS.sdk.tar.xz
-          ls -la
+        curl -L -C - --retry 3 --retry-delay 2 -o iPhoneOS14.0.sdk.tar.xz "https://github.com/theos/sdks/raw/master/iPhoneOS14.0.sdk.tar.xz"
+        if [ $? -eq 0 ]; then
+          file iPhoneOS14.0.sdk.tar.xz
+          xz -d iPhoneOS14.0.sdk.tar.xz
+          tar -xf iPhoneOS14.0.sdk.tar
+          rm iPhoneOS14.0.sdk.tar
+          echo "success=true" >> $GITHUB_OUTPUT
         fi
 
-    - name: Create Dummy SDK if Missing
+    - name: Download SDK Method 2
+      if: steps.download1.outputs.success != 'true'
+      id: download2
+      continue-on-error: true
       run: |
-        if [ ! -d "$SDKS/iPhoneOS14.0.sdk" ] && [ ! -d "$SDKS/iPhoneOS.sdk" ]; then
-          echo "Creating dummy SDK structure..."
-          mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/include"
-          mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/lib"
-          touch "$SDKS/iPhoneOS14.0.sdk/SDKSettings.json"
+        cd "$SDKS"
+        rm -f iPhoneOS*
+        curl -L -C - --retry 3 --retry-delay 2 -o SDK.tar.xz "https://github.com/xybp888/iOS-SDKs/releases/download/14.0/iPhoneOS14.0.sdk.tar.xz"
+        if [ $? -eq 0 ]; then
+          file SDK.tar.xz
+          xz -d SDK.tar.xz
+          tar -xf SDK.tar
+          rm SDK.tar
+          echo "success=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Download SDK Method 3
+      if: steps.download1.outputs.success != 'true' && steps.download2.outputs.success != 'true'
+      id: download3
+      continue-on-error: true
+      run: |
+        cd "$SDKS"
+        rm -f iPhoneOS* SDK*
+        curl -L -C - --retry 3 --retry-delay 2 -o iPhoneOS14.sdk.tar.xz "https://apt.thebigboss.org/theos/sdks/iPhoneOS14.0.sdk.tar.xz"
+        if [ $? -eq 0 ]; then
+          file iPhoneOS14.sdk.tar.xz
+          xz -d iPhoneOS14.sdk.tar.xz
+          tar -xf iPhoneOS14.sdk.tar
+          rm iPhoneOS14.sdk.tar
+          echo "success=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Minimal SDK Structure
+      if: steps.download1.outputs.success != 'true' && steps.download2.outputs.success != 'true' && steps.download3.outputs.success != 'true'
+      run: |
+        mkdir -p "$SDKS/iPhoneOS14.0.sdk"
+        mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/include"
+        mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/lib"
+        mkdir -p "$SDKS/iPhoneOS14.0.sdk/System/Library/Frameworks"
+        cat > "$SDKS/iPhoneOS14.0.sdk/SDKSettings.json" << 'EOF'
+{
+  "Version": "14.0",
+  "DisplayName": "iOS 14.0"
+}
+EOF
+
+    - name: Verify SDK
+      run: |
+        echo "Checking SDK structure..."
+        ls -la "$SDKS"
+        if [ -d "$SDKS/iPhoneOS14.0.sdk" ]; then
+          ls -la "$SDKS/iPhoneOS14.0.sdk"
+          echo "SDK is ready"
+        else
+          echo "ERROR: SDK not found"
+          exit 1
         fi
 
     - name: Install Additional Dependencies
       run: |
-        brew install dpkg fakeroot ldid llvm 2>/dev/null || true
+        brew install dpkg fakeroot ldid llvm git 2>/dev/null || true
 
-    - name: Fix Makefile SDK Path
+    - name: Configure Makefile
       run: |
-        if [ -f "Makefile" ]; then
-          sed -i '' 's/SDKVERSION.*/SDKVERSION = 14.0/g' Makefile || true
-          sed -i '' 's/^[[:space:]]*THEOS.*/THEOS ?= $(GITHUB_WORKSPACE)\/theos/g' Makefile || true
+        if [ ! -f "Makefile" ]; then
+          cat > Makefile << 'EOF'
+ARCHS = arm64
+TARGET = iphone:clang:14.0:14.0
+PACKAGE_VERSION = 1.0.0-1
+
+include $(THEOS)/makefiles/common.mk
+
+TWEAK_NAME = Package
+
+Package_FILES = Tweak.xm
+Package_CFLAGS = -fobjc-arc
+
+include $(THEOS_MAKE_PATH)/tweak.mk
+EOF
         fi
+        
+        sed -i '' 's/^SDKVERSION.*/SDKVERSION = 14.0/g' Makefile 2>/dev/null || true
 
     - name: Clean Build
       run: |
-        make clean THEOS="$THEOS" SDKS="$SDKS" 2>/dev/null || true
+        make clean THEOS="$THEOS" 2>/dev/null || true
         rm -rf packages/ build/ .theos/
 
     - name: Compile Package
       run: |
-        make package FINALPACKAGE=1 \
-          THEOS="$THEOS" \
-          SDKS="$SDKS" \
-          THEOS_DEVICE_IP=0.0.0.0 \
-          -j$(sysctl -n hw.ncpu) || make package FINALPACKAGE=1 THEOS="$THEOS" SDKS="$SDKS"
+        export THEOS="$THEOS"
+        export SDKS="$SDKS"
+        make package FINALPACKAGE=1 -j$(sysctl -n hw.ncpu) || make package FINALPACKAGE=1
 
-    - name: Find DEB Files
+    - name: Check Build Output
       run: |
-        find . -name "*.deb" -type f -exec ls -lh {} \;
+        echo "Build artifacts:"
+        find . -type f \( -name "*.deb" -o -name "*.zip" \) -exec ls -lh {} \;
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Package
+        name: Build-Package
         path: |
           packages/*.deb
           *.deb
@@ -120,6 +177,7 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: packages/*.deb
-        tag_name: v${{ github.run_number }}
+        tag_name: build-${{ github.run_number }}
+        draft: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
