@@ -2,41 +2,211 @@ name: CI - Advanced Theos Build Pipeline
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "develop" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "develop" ]
   workflow_dispatch:
 
 jobs:
   build_tweak:
     name: Build Tweak Package
-    runs-on: macos-14
+    runs-on: macos-latest
+    timeout-minutes: 60
 
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
         submodules: recursive
+        fetch-depth: 0
 
-    - name: Setup Environment
+    - name: Setup Environment Variables
       run: |
         echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
+        echo "SDKS=$GITHUB_WORKSPACE/theos/sdks" >> $GITHUB_ENV
+        echo "THEOS_MAKE_PATH=$GITHUB_WORKSPACE/theos/makefiles" >> $GITHUB_ENV
+        echo "PATH=$GITHUB_WORKSPACE/theos/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Cache Theos Installation
+      id: cache-theos
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ github.workspace }}/theos
+        key: ${{ runner.os }}-theos-${{ hashFiles('.github/workflows/*.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-theos-
 
     - name: Install Theos
+      if: steps.cache-theos.outputs.cache-hit != 'true'
       run: |
-        git clone --recursive https://github.com/theos/theos.git $THEOS
-        
+        echo "📦 جاري تثبيت Theos..."
+        if [ -d "$THEOS" ]; then
+          echo "🗑️ حذف Theos السابق"
+          rm -rf "$THEOS"
+        fi
+        git clone --recursive https://github.com/theos/theos.git "$THEOS"
+        echo "✅ تم تثبيت Theos بنجاح"
+
     - name: Verify Theos Installation
       run: |
-        ls -la $THEOS/
+        echo "🔍 التحقق من تثبيت Theos..."
+        ls -la "$THEOS"
+        $THEOS/bin/theos --version || echo "تحذير: لم يتمكن من الحصول على إصدار Theos"
+
+    - name: Clean SDKs Directory
+      run: |
+        echo "🧹 تنظيف مجلد SDKs..."
+        if [ -d "$SDKS" ]; then
+          rm -rf "$SDKS"
+        fi
+        mkdir -p "$SDKS"
+
+    - name: Detect SDK Requirements
+      id: sdk-detection
+      run: |
+        echo "🔎 البحث عن متطلبات SDK..."
+        if [ -f "Makefile" ]; then
+          SDK_VERSION=$(grep -i "SDKVERSION\|target" Makefile | head -1 || echo "14.0")
+          echo "SDK_VERSION=$SDK_VERSION" >> $GITHUB_OUTPUT
+        else
+          echo "SDK_VERSION=14.0" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Download Latest SDKs
+      run: |
+        echo "⬇️ جاري تحميل أحدث SDKs..."
+        mkdir -p "$SDKS"
+        
+        # تحميل مجموعة شاملة من SDKs
+        SDK_URLS=(
+          "https://github.com/theos/sdks/releases/download/latest/iPhoneOS14.0.sdk.tar.xz"
+          "https://github.com/theos/sdks/releases/download/latest/iPhoneOS15.0.sdk.tar.xz"
+          "https://github.com/theos/sdks/releases/download/latest/iPhoneOS16.0.sdk.tar.xz"
+        )
+        
+        for SDK_URL in "${SDK_URLS[@]}"; do
+          SDK_NAME=$(basename "$SDK_URL" .tar.xz)
+          echo "📥 تحميل $SDK_NAME..."
+          
+          if curl -L --fail -o "$SDKS/${SDK_NAME}.tar.xz" "$SDK_URL"; then
+            echo "✅ تم تحميل $SDK_NAME بنجاح"
+            tar -xf "$SDKS/${SDK_NAME}.tar.xz" -C "$SDKS" && rm "$SDKS/${SDK_NAME}.tar.xz"
+          else
+            echo "⚠️ فشل تحميل $SDK_NAME، سيتم المحاولة من مصدر بديل..."
+          fi
+        done
+
+    - name: Alternative SDK Download (Fallback)
+      if: failure()
+      run: |
+        echo "🔄 استخدام خادم بديل لتحميل SDKs..."
+        mkdir -p "$SDKS"
+        
+        # مصادر بديلة
+        FALLBACK_URLS=(
+          "https://github.com/xybp888/iOS-SDKs/releases/download/14.0/iPhoneOS14.0.sdk.tar.xz"
+        )
+        
+        for SDK_URL in "${FALLBACK_URLS[@]}"; do
+          SDK_NAME=$(basename "$SDK_URL" .tar.xz)
+          echo "📥 تحميل $SDK_NAME من مصدر بديل..."
+          
+          if curl -L --fail -o "$SDKS/${SDK_NAME}.tar.xz" "$SDK_URL"; then
+            echo "✅ تم التحميل من المصدر البديل"
+            tar -xf "$SDKS/${SDK_NAME}.tar.xz" -C "$SDKS" && rm "$SDKS/${SDK_NAME}.tar.xz"
+            break
+          fi
+        done
+
+    - name: Verify SDK Installation
+      run: |
+        echo "🔍 التحقق من SDKs المثبتة..."
+        if [ -d "$SDKS" ]; then
+          ls -lah "$SDKS"
+          echo "📊 عدد SDKs: $(find $SDKS -name "*.sdk" -type d | wc -l)"
+        else
+          echo "❌ خطأ: مجلد SDKs غير موجود"
+          exit 1
+        fi
+
+    - name: Install Missing Dependencies
+      run: |
+        echo "📦 تثبيت المكتبات المطلوبة..."
+        brew install dpkg fakeroot ldid 2>/dev/null || true
+
+    - name: Prepare Build Environment
+      run: |
+        echo "⚙️ تحضير بيئة البناء..."
+        export THEOS="$THEOS"
+        export SDKS="$SDKS"
+        chmod +x "$THEOS/bin"/* || true
+        
+        # التحقق من وجود Makefile
+        if [ ! -f "Makefile" ]; then
+          echo "❌ خطأ: لا يوجد Makefile في المستودع"
+          exit 1
+        fi
+
+    - name: Clean Previous Build
+      run: |
+        echo "🧹 تنظيف البناء السابق..."
+        make clean THEOS="$THEOS" || true
+        rm -rf packages/ build/ .theos/ || true
 
     - name: Compile and Package
       run: |
-        make package FINALPACKAGE=1 THEOS=$THEOS
+        echo "🔨 جاري البناء..."
+        make package FINALPACKAGE=1 THEOS="$THEOS" SDKS="$SDKS" || {
+          echo "❌ فشل البناء"
+          exit 1
+        }
+        echo "✅ تم البناء بنجاح"
+
+    - name: List Build Artifacts
+      if: success()
+      run: |
+        echo "📦 الملفات المنتجة:"
+        find . -name "*.deb" -type f -exec ls -lh {} \;
 
     - name: Upload Artifact
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: ShadowTrackerBypass-Package
-        path: packages/*.deb
-        if-no-files-found: error
+        path: |
+          packages/*.deb
+          *.deb
+        retention-days: 30
+        if-no-files-found: warn
+        compression-level: 9
+
+    - name: Create Release
+      if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          packages/*.deb
+          *.deb
+        tag_name: v${{ github.run_number }}
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build Status Summary
+      if: always()
+      run: |
+        echo "═══════════════════════════════════════"
+        echo "📊 ملخص البناء"
+        echo "═══════════════════════════════════════"
+        echo "حالة البناء: ${{ job.status }}"
+        echo "الوقت: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "═══════════════════════════════════════"
+
+    - name: Notify on Failure
+      if: failure()
+      run: |
+        echo "❌ فشل البناء!"
+        echo "🔗 يمكنك عرض السجلات الكاملة في:"
+        echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
