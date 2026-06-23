@@ -102,12 +102,12 @@ jobs:
         mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/include"
         mkdir -p "$SDKS/iPhoneOS14.0.sdk/usr/lib"
         mkdir -p "$SDKS/iPhoneOS14.0.sdk/System/Library/Frameworks"
-        cat > "$SDKS/iPhoneOS14.0.sdk/SDKSettings.json" << 'EOF'
-{
-  "Version": "14.0",
-  "DisplayName": "iOS 14.0"
-}
-EOF
+        cat > "$SDKS/iPhoneOS14.0.sdk/SDKSettings.json" << 'SDKEOF'
+        {
+          "Version": "14.0",
+          "DisplayName": "iOS 14.0"
+        }
+        SDKEOF
 
     - name: Verify SDK
       run: |
@@ -128,22 +128,21 @@ EOF
     - name: Configure Makefile
       run: |
         if [ ! -f "Makefile" ]; then
-          cat > Makefile << 'EOF'
-ARCHS = arm64
-TARGET = iphone:clang:14.0:14.0
-PACKAGE_VERSION = 1.0.0-1
+          cat > Makefile << 'MKEOF'
+        ARCHS = arm64
+        TARGET = iphone:clang:14.0:14.0
+        PACKAGE_VERSION = 1.0.0-1
 
-include $(THEOS)/makefiles/common.mk
+        include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = Package
+        TWEAK_NAME = Package
 
-Package_FILES = Tweak.xm
-Package_CFLAGS = -fobjc-arc
+        Package_FILES = Tweak.xm
+        Package_CFLAGS = -fobjc-arc
 
-include $(THEOS_MAKE_PATH)/tweak.mk
-EOF
+        include $(THEOS_MAKE_PATH)/tweak.mk
+        MKEOF
         fi
-        
         sed -i '' 's/^SDKVERSION.*/SDKVERSION = 14.0/g' Makefile 2>/dev/null || true
 
     - name: Clean Build
