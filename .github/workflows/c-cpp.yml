@@ -5,62 +5,47 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  workflow_dispatch: # يتيح لك تشغيل البناء يدوياً بنقرة زر من موقع GitHub
+  workflow_dispatch:
 
 jobs:
   build_tweak:
     name: Build Tweak Package
-    runs-on: macos-14 # بيئة متطورة بمعالجات Apple Silicon لسرعة بناء فائقة
+    runs-on: macos-14
 
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
-        submodules: recursive # جلب كافة الملفات والمستودعات الفرعية تلقائياً
+        submodules: recursive
 
-    - name: Setup Environment Variables
+    - name: Setup Environment
       run: |
         echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-        echo "THEOS_DEVICE_IP=127.0.0.1" >> $GITHUB_ENV
 
-    - name: Cache Theos Framework & SDKs
+    - name: Cache Theos
       id: cache-theos
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/theos
-        key: ${{ runner.os }}-theos-v3-ios14.5 # تم تحديث المفتاح إلى v3 لتخطي أي كاش تالف سابق
+        key: ${{ runner.os }}-theos-v4
 
-    - name: Install Theos Framework & SDK
+    - name: Install Theos & SDKs
       if: steps.cache-theos.outputs.cache-hit != 'true'
       run: |
-        # 1. استنساخ إطار عمل Theos بشكل كامل وعميق
         git clone --recursive https://github.com/theos/theos.git $THEOS
-        
-        # 2. تحميل الـ SDK المطلوبة (iPhoneOS14.5) من رابط ريليس رسمي ومستقر 100%
-        curl -LO https://github.com/CRKatri/Xcode-SDKs/releases/download/14.5/iPhoneOS14.5.sdk.tar.xz
-        
-        # 3. التأكد من وجود مجلد الـ sdks ثم فك الضغط بشكل آمن ونظيف
-        mkdir -p $THEOS/sdks
-        tar -xf iPhoneOS14.5.sdk.tar.xz -C $THEOS/sdks/
-        
-        # 4. تنظيف وحذف الملف المضغوط المؤقت لتوفير المساحة
-        rm iPhoneOS14.5.sdk.tar.xz
+        git clone --depth=1 https://github.com/theos/sdks.git $THEOS/sdks
 
-    - name: Verify Environment & SDK
+    - name: Verify SDK
       run: |
-        echo "=== التحقق من وجود الـ SDK بنجاح ==="
         ls -la $THEOS/sdks/
 
-    - name: Compile and Package Tweak
+    - name: Compile and Package
       run: |
-        # بناء الحزمة النهائية بصيغة rootless مع تفعيل الـ Optimization العالي
-        make package FINALPACKAGE=1
-      env:
-        THEOS: ${{ github.workspace }}/theos
+        make package FINALPACKAGE=1 THEOS=$THEOS
 
-    - name: Archive Build Artifacts
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ShadowTrackerBypass-Package
         path: packages/*.deb
-        if-no-files-found: error # سيعطي خطأ صريحاً إذا فشل في إنتاج ملف الـ deb لضمان الشفافية
+        if-no-files-found: error
