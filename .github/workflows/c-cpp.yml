@@ -1,4 +1,4 @@
-name: CI - Advanced Jailed Build (Auto-Fix)
+name: CI - Advanced Jailed Pipeline (Auto-Fix & Fishhook)
 
 on:
   push:
@@ -15,71 +15,119 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Auto-Fix Repository Issues
+    - name: Setup Base Environment
       run: |
-        echo "=== 1. Fixing Typos and Paths ==="
-        # تصحيح الخطأ الإملائي في اسم ملف Teak.xm إن وجد
+        echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
+        echo "MAKEFLAGS=-j$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
+
+    - name: 🛠️ Auto-Fix Repository & Makefile
+      run: |
+        echo "=== 1. Fixing File Names & Paths ==="
+        # تصحيح الخطأ الإملائي في الملف إن وجد
         if [ -f "Teak.xm" ]; then
           mv -v Teak.xm Tweak.xm
           echo "✓ Renamed Teak.xm to Tweak.xm"
         fi
-
-        # تصحيح مسار fishhook في Makefile ليتطابق مع الصورة
-        sed -i '' 's|fishhook/fishhook.c|fishhook.c|g' Makefile
-        echo "✓ Fixed fishhook path"
-
-        echo "=== 2. Converting Makefile for Non-Jailbreak (Jailed) ==="
-        # إزالة إعدادات الجيلبريك (Rootless)
-        sed -i '' '/THEOS_PACKAGE_SCHEME/d' Makefile
         
-        # إزالة مكتبة Substrate الخاصة بالجيلبريك
-        sed -i '' 's/-lsubstrate//g' Makefile
+        # تصحيح مسار مكتبة fishhook
+        if [ -f "Makefile" ]; then
+          sed -i '' 's|fishhook/fishhook.c|fishhook.c|g' Makefile
+          echo "✓ Fixed fishhook path"
+        fi
 
-        # تحويل البناء من أداة جيلبريك (Tweak) إلى مكتبة نقية (Library)
-        sed -i '' 's/TWEAK_NAME/LIBRARY_NAME/g' Makefile
-        sed -i '' 's/tweak.mk/library.mk/g' Makefile
-        
-        # تصحيح صيغة التارجت لتكون متوافقة مع Theos الحديث
-        sed -i '' 's/iphone:14.0:latest/iphone:clang:14.5:14.0/g' Makefile
+        echo "=== 2. Converting to Jailed Setup (No Jailbreak) ==="
+        if [ -f "Makefile" ]; then
+          # إزالة أي ارتباط بالجيلبريك
+          sed -i '' '/THEOS_PACKAGE_SCHEME/d' Makefile
+          sed -i '' 's/-lsubstrate//g' Makefile
+          
+          # تحويل الأداة إلى مكتبة نقية (Dylib)
+          sed -i '' 's/TWEAK_NAME/LIBRARY_NAME/g' Makefile
+          sed -i '' 's/tweak.mk/library.mk/g' Makefile
+          
+          # تحديث إعدادات التوافق
+          sed -i '' 's/iphone:14.0:latest/iphone:clang:14.5:14.0/g' Makefile
+          
+          # إزالة أوامر التثبيت الخاصة بالجيلبريك (لأنها ستسبب خطأ في البناء النقي)
+          sed -i '' '/after-install::/,$d' Makefile
+        fi
 
-        echo "=== Modified Makefile ==="
+        echo "=== Final Modified Makefile ==="
         cat Makefile
 
-    - name: Install System Dependencies
+    - name: 📦 Install System Dependencies
       run: |
         brew install make llvm ldid xz
+        # إنشاء اختصار لنسخة GNU Make لمنع أخطاء PATH
         mkdir -p $HOME/.local/bin
         ln -s $(which gmake) $HOME/.local/bin/make
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-    - name: Setup Theos
+    - name: ⚙️ Install Theos
       run: |
         git clone --depth=1 --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
-        echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
 
-    - name: Setup iOS 14.5 SDK
+    - name: 📥 Download iOS SDK (Fail-Safe System)
       run: |
         mkdir -p ${{ github.workspace }}/theos/sdks
         cd ${{ github.workspace }}/theos/sdks
-        curl -L -k -s -o SDK.tar.xz "https://github.com/xybp888/iOS-SDKs/releases/download/14.5/iPhoneOS14.5.sdk.tar.xz"
-        xz -d SDK.tar.xz
-        tar -xf SDK.tar
-        rm -f SDK.tar
+        
+        echo "=== Downloading iOS 14.5 SDK ==="
+        
+        # قائمة الروابط الذكية (الأساسي + بدائل احتياطية)
+        URLS=(
+          "https://github.com/theos/sdks/releases/download/latest/iPhoneOS14.5.sdk.tar.xz"
+          "https://github.com/xybp888/iOS-SDKs/releases/download/14.5/iPhoneOS14.5.sdk.tar.xz"
+          "https://raw.githubusercontent.com/theos/sdks/master/iPhoneOS14.5.sdk.tar.xz"
+        )
+        
+        SUCCESS=false
+        
+        for url in "${URLS[@]}"; do
+          echo "Trying: $url"
+          # -f لمنع تحميل صفحات الـ HTML الخاطئة (404/500)
+          if curl -f -L -k -s -o SDK.tar.xz "$url"; then
+            # التأكد القطعي من صيغة الملف قبل الفك
+            if file SDK.tar.xz | grep -q "XZ"; then
+              echo "✓ SDK downloaded successfully from this mirror!"
+              xz -d SDK.tar.xz
+              tar -xf SDK.tar
+              rm -f SDK.tar
+              SUCCESS=true
+              break
+            else
+              echo "✗ Warning: Downloaded file is corrupted or an HTML page. Trying next mirror..."
+            fi
+          else
+            echo "✗ Download failed from this mirror. Trying next..."
+          fi
+          # مسح الملفات المعطوبة قبل المحاولة التالية
+          rm -f SDK.tar.xz SDK.tar
+        done
+        
+        if [ "$SUCCESS" = false ]; then
+          echo "❌ Fatal Error: All SDK download links failed!"
+          exit 1
+        fi
 
-    - name: Compile Jailed Dylib
+    - name: 🔨 Compile Jailed Dylib (Production)
       run: |
+        # البناء النهائي بصيغة Release لتقليل حجم الملف وجعله أسرع
         make clean
-        make
+        make FINALPACKAGE=1
 
-    - name: Collect Artifacts
+    - name: 📁 Collect Output
       run: |
-        mkdir -p output
-        # البحث عن ملف الـ dylib النهائي ونقله
-        find .theos/obj -type f -name "*.dylib" -exec cp -v {} output/ \;
+        mkdir -p Final_Dylib
+        # البحث عن المكتبة المترجمة ونقلها
+        find .theos/obj -type f -name "*.dylib" -exec cp -v {} Final_Dylib/ \;
+        echo "=== Output Content ==="
+        ls -la Final_Dylib/
 
-    - name: Upload Dylib to GitHub
+    - name: ☁️ Upload Ready Dylib
       uses: actions/upload-artifact@v4
       with:
-        name: ShadowTrackerBypass-Jailed-Dylib-${{ github.run_number }}
-        path: output/
+        name: ShadowTrackerBypass-Jailed-${{ github.run_number }}
+        path: Final_Dylib/
         retention-days: 14
+        if-no-files-found: error
