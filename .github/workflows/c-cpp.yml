@@ -1,4 +1,4 @@
-name: CI - Ultimate Jailed Pipeline (Perfect Clean Build)
+name: CI - Ultimate Jailed Pipeline (Raw Unstripped Build)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_jailed_dylib:
-    name: Build Jailed Dylib (Strict Native Build)
+    name: Build Jailed Dylib (Unstripped)
     runs-on: macos-14
     timeout-minutes: 40
 
@@ -315,10 +315,14 @@ jobs:
         echo "=== Removing obsolete flags from Theos ==="
         find ${{ github.workspace }}/theos/makefiles -type f -name "*.mk" -exec sed -i '' 's/-Wl,-multiply_defined,suppress//g' {} +
 
-    - name: 🛠️ Rewrite Clean Makefile
+    - name: 🛠️ Rewrite Clean Makefile (RAW UNSTRIPPED)
       run: |
         echo "=== Creating Flawless Makefile ==="
         cat << 'EOF' > Makefile
+        # إجبار المترجم على البقاء بدون تقليص أو ضغط (No Optimization)
+        DEBUG = 1
+        GO_EASY_ON_ME = 1
+        
         SWIFT_VERSION = 5.0
         ARCHS = arm64 arm64e
         TARGET := iphone:clang:latest:14.0
@@ -392,20 +396,24 @@ jobs:
           fi
         done
 
-    - name: 🔨 Compile Jailed Dylib (Pure Native Build)
+    - name: 🔨 Compile Jailed Dylib (RAW MODE)
       run: |
         make clean
-        make FINALPACKAGE=1
+        # إزالة أمر FINALPACKAGE واستخدام وضع التصحيح لمنع الـ Strip نهائياً
+        make DEBUG=1 STRIP= 
 
     - name: 📁 Collect Output
       run: |
         mkdir -p Final_Dylib
-        find .theos/obj -type f -name "*.dylib" -exec cp -v {} Final_Dylib/ \;
+        find .theos/obj/debug -type f -name "*.dylib" -exec cp -v {} Final_Dylib/ \;
+        if [ -z "$(ls -A Final_Dylib)" ]; then
+           find .theos/obj -type f -name "*.dylib" -exec cp -v {} Final_Dylib/ \;
+        fi
 
     - name: ☁️ Upload Ready Dylib
       uses: actions/upload-artifact@v4
       with:
-        name: ShadowTrackerBypass-Jailed-${{ github.run_number }}
+        name: ShadowTrackerBypass-Jailed-RAW-${{ github.run_number }}
         path: Final_Dylib/
         retention-days: 14
         if-no-files-found: error
