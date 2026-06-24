@@ -20,7 +20,7 @@ jobs:
         echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
         echo "MAKEFLAGS=-j$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
 
-        - name: 🛠️ Auto-Fix Repository & Code (Force Fix)
+    - name: 🛠️ Auto-Fix Repository & Code (Force Fix)
       run: |
         echo "=== 1. Securing Fishhook Library ==="
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.c
@@ -78,9 +78,6 @@ jobs:
           sed -i '' 's/iphone:14.0:latest/iphone:clang:latest:14.0/g' Makefile
           sed -i '' '/after-install::/,$d' Makefile
         fi
-
-        echo "=== Final Modified Makefile ==="
-        cat Makefile
 
     - name: 📦 Install System Dependencies
       run: |
