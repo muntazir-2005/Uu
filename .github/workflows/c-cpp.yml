@@ -76,8 +76,6 @@ jobs:
           sed -i '' 's/tweak.mk/library.mk/g' Makefile
           sed -i '' 's/iphone:14.0:latest/iphone:clang:latest:14.0/g' Makefile
           sed -i '' '/after-install::/,$d' Makefile
-          
-          # إزالة تحذير -multiply_defined القديم إن وُجد لضمان نظافة السجل
           sed -i '' 's/-Wl,-multiply_defined,suppress//g' Makefile
         fi
 
@@ -92,31 +90,40 @@ jobs:
       run: |
         git clone --depth=1 --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
 
-    - name: 🔐 Compile OpenSSL Static Libraries (Strict Full Build)
+    - name: 🔐 Compile Official OpenSSL from Source (Native Fat Binary)
       run: |
-        echo "=== Downloading and Building OpenSSL for iOS (No Bypass) ==="
-        git clone --depth 1 https://github.com/jasonacox/Build-OpenSSL-cURL.git /tmp/build-openssl
-        cd /tmp/build-openssl
+        echo "=== Downloading Official OpenSSL 3.1.5 ==="
+        curl -sO https://www.openssl.org/source/openssl-3.1.5.tar.gz
+        tar -xf openssl-3.1.5.tar.gz
+        cd openssl-3.1.5
         
-        # تجميع OpenSSL بنسخته الكاملة لمعمارية iOS فقط
-        ./build.sh -p ios -e
+        IOS_SDK=$(xcrun --sdk iphoneos --show-sdk-path)
         
-        echo "=== Integrating OpenSSL into Theos SDK ==="
+        echo "=== Building for arm64 ==="
+        export CC="clang -isysroot $IOS_SDK -arch arm64"
+        ./Configure ios64-cross no-shared
+        make clean && make -j$(sysctl -n hw.ncpu)
+        cp libssl.a libssl_arm64.a
+        cp libcrypto.a libcrypto_arm64.a
+        
+        echo "=== Building for arm64e ==="
+        export CC="clang -isysroot $IOS_SDK -arch arm64e"
+        ./Configure ios64-cross no-shared
+        make clean && make -j$(sysctl -n hw.ncpu)
+        cp libssl.a libssl_arm64e.a
+        cp libcrypto.a libcrypto_arm64e.a
+        
+        echo "=== Merging to Universal Fat Binaries (arm64 + arm64e) ==="
+        lipo -create libssl_arm64.a libssl_arm64e.a -output libssl.a
+        lipo -create libcrypto_arm64.a libcrypto_arm64e.a -output libcrypto.a
+        
+        echo "=== Integrating into Theos SDK ==="
         mkdir -p ${{ github.workspace }}/theos/lib
-        mkdir -p ${{ github.workspace }}/theos/include/openssl
+        mkdir -p ${{ github.workspace }}/theos/include
+        cp -v libssl.a libcrypto.a ${{ github.workspace }}/theos/lib/
+        cp -rv include/openssl ${{ github.workspace }}/theos/include/
         
-        # حقن ملفات التجميع المكتملة في قلب Theos
-        if [ -d "openssl/iOS-fat/lib" ]; then
-          echo "Found Fat Binaries..."
-          cp -v openssl/iOS-fat/lib/*.a ${{ github.workspace }}/theos/lib/
-          cp -rv openssl/iOS-fat/include/openssl/* ${{ github.workspace }}/theos/include/openssl/
-        else
-          echo "Found Standard Binaries..."
-          cp -v openssl/iOS/lib/*.a ${{ github.workspace }}/theos/lib/
-          cp -rv openssl/iOS/include/openssl/* ${{ github.workspace }}/theos/include/openssl/
-        fi
-        
-        echo "✓ OpenSSL Compiled and Integrated Successfully!"
+        echo "✓ Strict Native OpenSSL Compiled and Injected!"
 
     - name: 📥 Download iOS SDK (Bulletproof System)
       run: |
