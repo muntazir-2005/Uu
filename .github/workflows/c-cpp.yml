@@ -90,12 +90,29 @@ jobs:
       run: |
         git clone --depth=1 --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
 
-    - name: 🔐 Compile Official OpenSSL from Source (Native Fat Binary)
+    - name: 🔐 Compile Official OpenSSL from Source (Bulletproof Download)
       run: |
         echo "=== Downloading Official OpenSSL 3.1.5 ==="
-        curl -sO https://www.openssl.org/source/openssl-3.1.5.tar.gz
-        tar -xf openssl-3.1.5.tar.gz
-        cd openssl-3.1.5
+        OPENSSL_VER="3.1.5"
+        
+        # محاولة التحميل من المسار الرئيسي
+        curl -sL -o openssl.tar.gz "https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz"
+        
+        # فحص الملف، إذا لم يكن أرشيفاً حقيقياً، حاول من مسار الـ old
+        if ! file openssl.tar.gz | grep -q "gzip compressed data"; then
+          echo "Main source failed. Trying old/ archive..."
+          curl -sL -o openssl.tar.gz "https://www.openssl.org/source/old/3.1/openssl-${OPENSSL_VER}.tar.gz"
+        fi
+        
+        # فحص أخير، إذا فشل الاثنان نقوم بالتحميل من GitHub مباشرة
+        if ! file openssl.tar.gz | grep -q "gzip compressed data"; then
+          echo "OpenSSL server failed. Falling back to GitHub Releases..."
+          curl -sL -o openssl.tar.gz "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VER}/openssl-${OPENSSL_VER}.tar.gz"
+        fi
+        
+        # فك الضغط الآن آمن تماماً
+        tar -xf openssl.tar.gz
+        cd openssl-${OPENSSL_VER}
         
         IOS_SDK=$(xcrun --sdk iphoneos --show-sdk-path)
         
