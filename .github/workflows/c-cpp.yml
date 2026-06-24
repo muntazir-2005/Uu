@@ -1,4 +1,4 @@
-name: CI - Advanced Jailed Pipeline (Auto-Fix & Fishhook)
+name: CI - Ultimate Jailed Pipeline (Auto-Fix & Fishhook)
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
     - name: 🛠️ Auto-Fix Repository & Makefile
       run: |
         echo "=== 1. Fixing File Names & Paths ==="
-        # تصحيح الخطأ الإملائي في الملف إن وجد
+        # تصحيح الخطأ الإملائي في اسم الملف إن وجد
         if [ -f "Teak.xm" ]; then
           mv -v Teak.xm Tweak.xm
           echo "✓ Renamed Teak.xm to Tweak.xm"
@@ -45,10 +45,10 @@ jobs:
           sed -i '' 's/TWEAK_NAME/LIBRARY_NAME/g' Makefile
           sed -i '' 's/tweak.mk/library.mk/g' Makefile
           
-          # تحديث إعدادات التوافق
-          sed -i '' 's/iphone:14.0:latest/iphone:clang:14.5:14.0/g' Makefile
+          # تحديث إعدادات التوافق لاختيار أحدث SDK يتم تحميله تلقائياً
+          sed -i '' 's/iphone:14.0:latest/iphone:clang:latest:14.0/g' Makefile
           
-          # إزالة أوامر التثبيت الخاصة بالجيلبريك (لأنها ستسبب خطأ في البناء النقي)
+          # إزالة أوامر التثبيت الخاصة بالجيلبريك لمنع توقف البناء
           sed -i '' '/after-install::/,$d' Makefile
         fi
 
@@ -57,8 +57,8 @@ jobs:
 
     - name: 📦 Install System Dependencies
       run: |
-        brew install make llvm ldid xz
-        # إنشاء اختصار لنسخة GNU Make لمنع أخطاء PATH
+        brew install make llvm ldid xz wget
+        # إنشاء اختصار لنسخة GNU Make لمنع أخطاء الـ PATH
         mkdir -p $HOME/.local/bin
         ln -s $(which gmake) $HOME/.local/bin/make
         echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -67,59 +67,62 @@ jobs:
       run: |
         git clone --depth=1 --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
 
-    - name: 📥 Download iOS SDK (Fail-Safe System)
+    - name: 📥 Download iOS SDK (Bulletproof System)
       run: |
         mkdir -p ${{ github.workspace }}/theos/sdks
         cd ${{ github.workspace }}/theos/sdks
         
-        echo "=== Downloading iOS 14.5 SDK ==="
+        echo "=== Downloading iOS SDK ==="
         
-        # قائمة الروابط الذكية (الأساسي + بدائل احتياطية)
+        # قائمة الروابط الذكية الشاملة لعدة إصدارات
         URLS=(
-          "https://github.com/theos/sdks/releases/download/latest/iPhoneOS14.5.sdk.tar.xz"
-          "https://github.com/xybp888/iOS-SDKs/releases/download/14.5/iPhoneOS14.5.sdk.tar.xz"
-          "https://raw.githubusercontent.com/theos/sdks/master/iPhoneOS14.5.sdk.tar.xz"
+          "https://github.com/theos/sdks/releases/latest/download/iPhoneOS14.5.sdk.tar.xz"
+          "https://github.com/theos/sdks/releases/latest/download/iPhoneOS15.0.sdk.tar.xz"
+          "https://github.com/theos/sdks/releases/latest/download/iPhoneOS14.4.sdk.tar.xz"
+          "https://github.com/xybp888/iOS-SDKs/releases/download/iOS-SDKs/iPhoneOS14.5.sdk.tar.xz"
         )
         
         SUCCESS=false
         
         for url in "${URLS[@]}"; do
-          echo "Trying: $url"
-          # -f لمنع تحميل صفحات الـ HTML الخاطئة (404/500)
-          if curl -f -L -k -s -o SDK.tar.xz "$url"; then
-            # التأكد القطعي من صيغة الملف قبل الفك
+          echo "Trying to download from: $url"
+          # استخدام wget للتعامل مع الروابط بكفاءة أعلى
+          if wget -q -O SDK.tar.xz "$url"; then
+            # التأكد القطعي من صيغة الملف لتجنب خطأ xz file format not recognized
             if file SDK.tar.xz | grep -q "XZ"; then
-              echo "✓ SDK downloaded successfully from this mirror!"
+              echo "✓ SUCCESS! Valid SDK archive downloaded."
               xz -d SDK.tar.xz
               tar -xf SDK.tar
               rm -f SDK.tar
               SUCCESS=true
               break
             else
-              echo "✗ Warning: Downloaded file is corrupted or an HTML page. Trying next mirror..."
+              echo "✗ File is not a valid XZ archive (likely a 404 HTML page). Trying next..."
             fi
           else
-            echo "✗ Download failed from this mirror. Trying next..."
+            echo "✗ Download failed completely. Trying next..."
           fi
-          # مسح الملفات المعطوبة قبل المحاولة التالية
           rm -f SDK.tar.xz SDK.tar
         done
         
         if [ "$SUCCESS" = false ]; then
-          echo "❌ Fatal Error: All SDK download links failed!"
+          echo "❌ Fatal Error: All SDK download mirrors failed!"
           exit 1
         fi
+        
+        echo "=== Installed SDKs ==="
+        ls -la
 
     - name: 🔨 Compile Jailed Dylib (Production)
       run: |
-        # البناء النهائي بصيغة Release لتقليل حجم الملف وجعله أسرع
+        # البناء بصيغة Release (FINALPACKAGE=1) لتقليل الحجم وجعله أسرع
         make clean
         make FINALPACKAGE=1
 
     - name: 📁 Collect Output
       run: |
         mkdir -p Final_Dylib
-        # البحث عن المكتبة المترجمة ونقلها
+        # البحث عن المكتبة المترجمة بصيغة dylib ونقلها
         find .theos/obj -type f -name "*.dylib" -exec cp -v {} Final_Dylib/ \;
         echo "=== Output Content ==="
         ls -la Final_Dylib/
