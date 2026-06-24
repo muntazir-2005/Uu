@@ -43,19 +43,23 @@ jobs:
           sed -i '' 's|"fishhook/fishhook.h"|"fishhook.h"|g' Tweak.xm
           sed -i '' 's|<fishhook/fishhook.h>|"fishhook.h"|g' Tweak.xm
 
-          # 3. إصلاح السطر 1476 المقطوع والخطأ في اسم المتغير
-          sed -i '' 's/{"RSA_private_decrypt", hooked_RSA_private$/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void *)\&orig_RSA_private_decrypt},/g' Tweak.xm
-          sed -i '' 's/{"RSA_private_decrypt", hooked_RSA_private\s/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void *)\&orig_RSA_private_decrypt},/g' Tweak.xm
+          # 3. إصلاح مشكلة C++ strict casting في جميع الدوال بشكل شامل
+          sed -i '' 's/, hooked_/, (void *)hooked_/g' Tweak.xm
+          sed -i '' 's/, (void \*)&orig_/, (void **)\&orig_/g' Tweak.xm
+          sed -i '' 's/, &orig_/, (void **)\&orig_/g' Tweak.xm
+
+          # 4. إصلاح السطر 1476 المقطوع والخطأ في اسم المتغير
+          sed -i '' 's/{"RSA_private_decrypt", (void \*)hooked_RSA_private$/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void **)\&orig_RSA_private_decrypt},/g' Tweak.xm
+          sed -i '' 's/{"RSA_private_decrypt", (void \*)hooked_RSA_private\s/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void **)\&orig_RSA_private_decrypt},/g' Tweak.xm
           
-          # 4. إكمال الملف المقطوع وإغلاق الأقواس (autoreleasepool و constructor)
-          # نستخدم grep لنتأكد أننا لا نضيفها مرتين في حال حاولت بناء الملف أكثر من مرة
+          # 5. إكمال الملف المقطوع وإغلاق الأقواس (autoreleasepool و constructor)
           if ! grep -q "rebind_symbols(bindings" Tweak.xm; then
             cat << 'EOF' >> Tweak.xm
-            // إكمال بقية المصفوفة التي انقطعت
-            {"RSA_public_encrypt", (void *)hooked_RSA_public_encrypt, (void *)&orig_RSA_public_encrypt},
-            {"RSA_public_decrypt", (void *)hooked_RSA_public_decrypt, (void *)&orig_RSA_public_decrypt},
-            {"RSA_sign", (void *)hooked_RSA_sign, (void *)&orig_RSA_sign},
-            {"RSA_verify", (void *)hooked_RSA_verify, (void *)&orig_RSA_verify}
+            // إكمال بقية المصفوفة التي انقطعت مع التصحيحات (void **)
+            {"RSA_public_encrypt", (void *)hooked_RSA_public_encrypt, (void **)&orig_RSA_public_encrypt},
+            {"RSA_public_decrypt", (void *)hooked_RSA_public_decrypt, (void **)&orig_RSA_public_decrypt},
+            {"RSA_sign", (void *)hooked_RSA_sign, (void **)&orig_RSA_sign},
+            {"RSA_verify", (void *)hooked_RSA_verify, (void **)&orig_RSA_verify}
         };
         
         // تفعيل دوال Fishhook نهائياً
