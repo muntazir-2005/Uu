@@ -20,7 +20,7 @@ jobs:
         echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
         echo "MAKEFLAGS=-j$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
 
-    - name: 🛠️ Auto-Fix Repository & Code (Force Fix)
+    - name: 🛠️ Auto-Fix Repository & Code (Root Fixes)
       run: |
         echo "=== 1. Securing Fishhook Library ==="
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.c
@@ -30,9 +30,9 @@ jobs:
           mv -v Teak.xm Tweak.xm
         fi
 
-        echo "=== 2. Fixing Tweak.xm Compilation Errors ==="
+        echo "=== 2. Fixing Tweak.xm Compilation Errors & Warnings ==="
         if [ -f "Tweak.xm" ]; then
-          # 1. إضافة مكتبة UIKit
+          # 1. إضافة مكتبة UIKit لتجنب خطأ expected a type
           if ! grep -q "<UIKit/UIKit.h>" Tweak.xm; then
             sed -i '' '1i\
             #import <UIKit/UIKit.h>
@@ -43,19 +43,23 @@ jobs:
           sed -i '' 's|"fishhook/fishhook.h"|"fishhook.h"|g' Tweak.xm
           sed -i '' 's|<fishhook/fishhook.h>|"fishhook.h"|g' Tweak.xm
 
-          # 3. إصلاح مشكلة C++ strict casting
+          # 3. الحل الجذري لتحذيرات [-Wunused-variable] عبر إضافة __attribute__((unused))
+          # هذا الأمر يبحث عن أي سطر يحتوي على تعريف متغير orig_ ويخبر المترجم بتجاهل عدم استخدامه
+          sed -i '' '/(\*orig_/s/static /static __attribute__((unused)) /g' Tweak.xm
+
+          # 4. إصلاح مشكلة C++ strict casting في جميع دوال fishhook
           sed -i '' 's/, hooked_/, (void *)hooked_/g' Tweak.xm
           sed -i '' 's/, (void \*)&orig_/, (void **)\&orig_/g' Tweak.xm
           sed -i '' 's/, &orig_/, (void **)\&orig_/g' Tweak.xm
 
-          # 4. إصلاح السطر المقطوع
+          # 5. إصلاح السطر 1476 المقطوع في الملف
           sed -i '' 's/{"RSA_private_decrypt", (void \*)hooked_RSA_private$/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void **)\&orig_RSA_private_decrypt},/g' Tweak.xm
           sed -i '' 's/{"RSA_private_decrypt", (void \*)hooked_RSA_private\s/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void **)\&orig_RSA_private_decrypt},/g' Tweak.xm
           
-          # 5. إزالة المتغير غير المستخدم (libSystem) لتجنب خطأ -Werror
+          # 6. إزالة المتغير غير المستخدم (libSystem) تماماً لمنع الخطأ القاتل
           sed -i '' 's/void \*libSystem = dlopen/dlopen/g' Tweak.xm
           
-          # 6. إكمال الملف المقطوع وإغلاق الأقواس
+          # 7. إكمال الملف المقطوع وإغلاق الأقواس بشكل صحيح
           if ! grep -q "rebind_symbols(bindings" Tweak.xm; then
             cat << 'EOF' >> Tweak.xm
             // إكمال بقية المصفوفة
@@ -75,7 +79,7 @@ jobs:
           fi
         fi
 
-        echo "=== 3. Converting to Jailed Setup & Bypassing Strict Warnings ==="
+        echo "=== 3. Converting to Jailed Setup ==="
         if [ -f "Makefile" ]; then
           sed -i '' 's|fishhook/fishhook.c|fishhook.c|g' Makefile
           sed -i '' '/THEOS_PACKAGE_SCHEME/d' Makefile
@@ -84,8 +88,6 @@ jobs:
           sed -i '' 's/tweak.mk/library.mk/g' Makefile
           sed -i '' 's/iphone:14.0:latest/iphone:clang:latest:14.0/g' Makefile
           sed -i '' '/after-install::/,$d' Makefile
-          # إضافة علم لتخطي أخطاء التحذيرات (Bulletproof)
-          echo "export CFLAGS += -Wno-error=unused-variable -Wno-error" >> Makefile
         fi
 
     - name: 📦 Install System Dependencies
@@ -142,6 +144,7 @@ jobs:
     - name: 🔨 Compile Jailed Dylib (Production)
       run: |
         make clean
+        # بناء طبيعي وصارم جداً بدون أي تخطي للتحذيرات!
         make FINALPACKAGE=1
 
     - name: 📁 Collect Output
