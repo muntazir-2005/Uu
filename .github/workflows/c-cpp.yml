@@ -20,35 +20,41 @@ jobs:
         echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
         echo "MAKEFLAGS=-j$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
 
-    - name: 🛠️ Auto-Fix Repository & Makefile
+    - name: 🛠️ Auto-Fix Repository & Code
       run: |
-        echo "=== 1. Fixing File Names & Paths ==="
+        echo "=== 1. Securing Fishhook Library ==="
+        # تحميل ملفات fishhook الرسمية مباشرة إلى المجلد الرئيسي لضمان وجودها
+        curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.c
+        curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.h
+        echo "✓ Downloaded official fishhook.c and fishhook.h"
+
+        echo "=== 2. Fixing File Names & Imports ==="
         # تصحيح الخطأ الإملائي في اسم الملف إن وجد
         if [ -f "Teak.xm" ]; then
           mv -v Teak.xm Tweak.xm
           echo "✓ Renamed Teak.xm to Tweak.xm"
         fi
         
-        # تصحيح مسار مكتبة fishhook
-        if [ -f "Makefile" ]; then
-          sed -i '' 's|fishhook/fishhook.c|fishhook.c|g' Makefile
-          echo "✓ Fixed fishhook path"
+        # تصحيح مسار الاستدعاء داخل الكود المصدري (Tweak.xm)
+        if [ -f "Tweak.xm" ]; then
+          sed -i '' 's|"fishhook/fishhook.h"|"fishhook.h"|g' Tweak.xm
+          sed -i '' 's|<fishhook/fishhook.h>|"fishhook.h"|g' Tweak.xm
+          echo "✓ Fixed fishhook imports inside Tweak.xm"
         fi
 
-        echo "=== 2. Converting to Jailed Setup (No Jailbreak) ==="
+        # تصحيح مسار مكتبة fishhook في Makefile
         if [ -f "Makefile" ]; then
-          # إزالة أي ارتباط بالجيلبريك
+          sed -i '' 's|fishhook/fishhook.c|fishhook.c|g' Makefile
+          echo "✓ Fixed fishhook path in Makefile"
+        fi
+
+        echo "=== 3. Converting to Jailed Setup (No Jailbreak) ==="
+        if [ -f "Makefile" ]; then
           sed -i '' '/THEOS_PACKAGE_SCHEME/d' Makefile
           sed -i '' 's/-lsubstrate//g' Makefile
-          
-          # تحويل الأداة إلى مكتبة نقية (Dylib)
           sed -i '' 's/TWEAK_NAME/LIBRARY_NAME/g' Makefile
           sed -i '' 's/tweak.mk/library.mk/g' Makefile
-          
-          # تحديث إعدادات التوافق لاختيار أحدث SDK يتم تحميله تلقائياً
           sed -i '' 's/iphone:14.0:latest/iphone:clang:latest:14.0/g' Makefile
-          
-          # إزالة أوامر التثبيت الخاصة بالجيلبريك لمنع توقف البناء
           sed -i '' '/after-install::/,$d' Makefile
         fi
 
@@ -58,7 +64,6 @@ jobs:
     - name: 📦 Install System Dependencies
       run: |
         brew install make llvm ldid xz wget
-        # إنشاء اختصار لنسخة GNU Make لمنع أخطاء الـ PATH
         mkdir -p $HOME/.local/bin
         ln -s $(which gmake) $HOME/.local/bin/make
         echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -74,7 +79,6 @@ jobs:
         
         echo "=== Downloading iOS SDK ==="
         
-        # قائمة الروابط الذكية الشاملة لعدة إصدارات
         URLS=(
           "https://github.com/theos/sdks/releases/latest/download/iPhoneOS14.5.sdk.tar.xz"
           "https://github.com/theos/sdks/releases/latest/download/iPhoneOS15.0.sdk.tar.xz"
@@ -86,9 +90,7 @@ jobs:
         
         for url in "${URLS[@]}"; do
           echo "Trying to download from: $url"
-          # استخدام wget للتعامل مع الروابط بكفاءة أعلى
           if wget -q -O SDK.tar.xz "$url"; then
-            # التأكد القطعي من صيغة الملف لتجنب خطأ xz file format not recognized
             if file SDK.tar.xz | grep -q "XZ"; then
               echo "✓ SUCCESS! Valid SDK archive downloaded."
               xz -d SDK.tar.xz
@@ -97,7 +99,7 @@ jobs:
               SUCCESS=true
               break
             else
-              echo "✗ File is not a valid XZ archive (likely a 404 HTML page). Trying next..."
+              echo "✗ File is not a valid XZ archive. Trying next..."
             fi
           else
             echo "✗ Download failed completely. Trying next..."
@@ -109,20 +111,15 @@ jobs:
           echo "❌ Fatal Error: All SDK download mirrors failed!"
           exit 1
         fi
-        
-        echo "=== Installed SDKs ==="
-        ls -la
 
     - name: 🔨 Compile Jailed Dylib (Production)
       run: |
-        # البناء بصيغة Release (FINALPACKAGE=1) لتقليل الحجم وجعله أسرع
         make clean
         make FINALPACKAGE=1
 
     - name: 📁 Collect Output
       run: |
         mkdir -p Final_Dylib
-        # البحث عن المكتبة المترجمة بصيغة dylib ونقلها
         find .theos/obj -type f -name "*.dylib" -exec cp -v {} Final_Dylib/ \;
         echo "=== Output Content ==="
         ls -la Final_Dylib/
