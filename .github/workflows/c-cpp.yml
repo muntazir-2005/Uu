@@ -194,16 +194,17 @@ jobs:
         content = content.replace('"fishhook/fishhook.h"', '"fishhook.h"')
         content = content.replace('<fishhook/fishhook.h>', '"fishhook.h"')
 
-        # قطع الأجزاء القديمة المعطوبة لمنع الأخطاء النحوية (Syntax Errors)
+        # قطع الأجزاء القديمة المعطوبة لمنع الأخطاء النحوية وتداخل الدوال
+        # تمت إضافة %ctor لضمان عدم القص داخل دالة التشغيل الخاصة بـ Theos
         cut_idx = len(content)
-        for marker in ["struct rebinding bindings", "__attribute__((constructor))", "static __attribute__((constructor))"]:
+        for marker in ["%ctor", "struct rebinding bindings", "__attribute__((constructor))", "static __attribute__((constructor))"]:
             idx = content.find(marker)
             if idx != -1 and idx < cut_idx:
                 cut_idx = idx
 
         clean_content = content[:cut_idx]
 
-        # إغلاق الأقواس التي تم قطعها إن وجدت
+        # إغلاق أي دالة مفتوحة بشكل سليم قبل إضافة المحرك الجديد في النطاق العام (Global Scope)
         last_brace = clean_content.rfind("}")
         if last_brace != -1:
             clean_content = clean_content[:last_brace+1]
@@ -223,7 +224,7 @@ jobs:
                 else:
                     c_hooks.append(hook)
 
-        # بناء محرك الربط بناءً على ملفك حصرياً (بدون تكرار أو إعادة تعريف)
+        # بناء محرك الربط بناءً على ملفك حصرياً (بدون تكرار أو إعادة تعريف أو تداخل)
         engine = "\n\n// --- ULTIMATE DYNAMIC ENGINE ---\n"
         engine += """
         static void swizzleSelectorEverywhere(NSString *selName, void *newImpl, void *origImplPrefix) {
