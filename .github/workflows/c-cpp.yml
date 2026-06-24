@@ -1,4 +1,4 @@
-name: CI - Ultimate Jailed Pipeline (Swift + Strict Build)
+name: CI - Ultimate Jailed Pipeline (100% Full Power + SwiftUI)
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build_jailed_dylib:
-    name: Build Jailed Dylib (ObjC + Swift)
+    name: Build Jailed Dylib (Strict Native Build)
     runs-on: macos-14
     timeout-minutes: 40
 
@@ -20,26 +20,166 @@ jobs:
         echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
         echo "MAKEFLAGS=-j$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
 
-    - name: 🛠️ Auto-Fix Repository & Code (Root Fixes & Swift Bridge)
+    - name: 🎨 Auto-Generate BlackUI.swift (Exact User Request)
+      run: |
+        echo "=== Creating Modern SwiftUI Glass Interface ==="
+        cat << 'EOF' > BlackUI.swift
+        import SwiftUI
+        import UIKit
+
+        @objc(BlackUIBridge)
+        public class BlackUIBridge: NSObject {
+            @objc public static func showProtectionUI() {
+                DispatchQueue.main.async {
+                    if #available(iOS 15.0, *) {
+                        guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }),
+                              let rootVC = window.rootViewController else { return }
+                        var topController = rootVC
+                        while let presented = topController.presentedViewController {
+                            topController = presented
+                        }
+                        let hostingController = UIHostingController(rootView: MainContainerView())
+                        hostingController.modalPresentationStyle = .overFullScreen
+                        hostingController.view.backgroundColor = .clear
+                        topController.present(hostingController, animated: true) {
+                            NotificationCenter.default.post(name: NSNotification.Name("BlackProtectionActivated"), object: nil)
+                        }
+                    }
+                }
+            }
+        }
+
+        @available(iOS 15.0, *)
+        struct MainContainerView: View {
+            @State private var showProtectionToast = false
+            @State private var isVisible = true
+            var body: some View {
+                if isVisible {
+                    ZStack(alignment: .top) {
+                        HomeView(isVisible: $isVisible)
+                        if showProtectionToast {
+                            ProtectionToastView().transition(.move(edge: .top).combined(with: .opacity)).zIndex(1)
+                        }
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("BlackProtectionActivated"))) { _ in
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.6, blendDuration: 0)) {
+                            showProtectionToast = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                            withAnimation(.easeInOut) { showProtectionToast = false }
+                        }
+                    }
+                }
+            }
+        }
+
+        @available(iOS 15.0, *)
+        struct ProtectionToastView: View {
+            var body: some View {
+                HStack(spacing: 15) {
+                    Image(systemName: "shield.checkerboard").font(.system(size: 24, weight: .bold)).foregroundColor(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("تم تشغيل الحماية").font(.headline).fontWeight(.bold).foregroundColor(.white)
+                        Text("BLACK.").font(.caption).foregroundColor(.gray)
+                    }
+                    Spacer()
+                }
+                .padding().background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(LinearGradient(colors: [.green.opacity(0.6), .clear], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+                .shadow(color: .green.opacity(0.2), radius: 15, x: 0, y: 10).padding(.horizontal, 20).padding(.top, 40)
+            }
+        }
+
+        @available(iOS 15.0, *)
+        struct HomeView: View {
+            @State private var isAnimating = false
+            @Binding var isVisible: Bool
+            var body: some View {
+                ZStack {
+                    Color.black.opacity(0.95).ignoresSafeArea()
+                    Circle().fill(Color.blue.opacity(0.15)).frame(width: 300, height: 300).blur(radius: 60).offset(x: -100, y: -200)
+                    Circle().fill(Color.purple.opacity(0.15)).frame(width: 300, height: 300).blur(radius: 60).offset(x: 100, y: 200)
+                    VStack(spacing: 40) {
+                        Spacer()
+                        Text("BLACK")
+                            .font(.system(size: 70, weight: .black, design: .rounded))
+                            .foregroundStyle(LinearGradient(colors: [Color.white, Color.gray.opacity(0.6)], startPoint: .top, endPoint: .bottom))
+                            .shadow(color: .white.opacity(isAnimating ? 0.4 : 0.1), radius: isAnimating ? 20 : 5, x: 0, y: 0)
+                            .scaleEffect(isAnimating ? 1.02 : 1.0)
+                            .animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: isAnimating)
+                            .onAppear { isAnimating = true }
+                        
+                        VStack(spacing: 15) {
+                            GlassCardView(icon: "checkmark.shield.fill", title: "حالة النظام", value: "تم التشغيل", color: .green)
+                        }
+                        .padding(.horizontal, 24)
+                        
+                        Spacer()
+                        FloatingTabBar(isVisible: $isVisible)
+                    }
+                }
+            }
+        }
+
+        @available(iOS 15.0, *)
+        struct GlassCardView: View {
+            var icon: String; var title: String; var value: String; var color: Color
+            var body: some View {
+                HStack {
+                    Image(systemName: icon).font(.system(size: 24, weight: .medium)).foregroundColor(color).frame(width: 40)
+                    Text(title).font(.system(size: 18, weight: .semibold)).foregroundColor(.white)
+                    Spacer()
+                    Text(value).font(.system(size: 16, weight: .bold)).foregroundColor(.white)
+                        .padding(.horizontal, 16).padding(.vertical, 8).background(color.opacity(0.8)).clipShape(Capsule())
+                }
+                .padding().background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color.white.opacity(0.1), lineWidth: 1))
+            }
+        }
+
+        @available(iOS 15.0, *)
+        struct FloatingTabBar: View {
+            @Binding var isVisible: Bool
+            var body: some View {
+                HStack(spacing: 0) {
+                    TabBarIcon(icon: "xmark.circle.fill", isSelected: false) {
+                        withAnimation {
+                            isVisible = false
+                            guard let window = UIApplication.shared.windows.first(where: { $0.isKeyWindow }),
+                                  let rootVC = window.rootViewController else { return }
+                            rootVC.dismiss(animated: true)
+                        }
+                    }
+                }
+                .padding(.vertical, 15).padding(.horizontal, 40).background(.ultraThinMaterial).clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.1), lineWidth: 1)).shadow(color: .black.opacity(0.5), radius: 20, x: 0, y: 10).padding(.bottom, 20)
+            }
+        }
+
+        @available(iOS 15.0, *)
+        struct TabBarIcon: View {
+            var icon: String; var isSelected: Bool; var action: (() -> Void)?
+            var body: some View {
+                Button(action: { action?() }) {
+                    Image(systemName: icon).font(.system(size: 28)).foregroundColor(isSelected ? .white : .red.opacity(0.8)).scaleEffect(isSelected ? 1.1 : 1.0).animation(.spring(), value: isSelected)
+                }
+            }
+        }
+        EOF
+
+    - name: 🛠️ Auto-Fix Repository & Code (Dynamic Hook Engine - 100% Power)
       run: |
         echo "=== 1. Securing Fishhook Library ==="
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.c
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.h
         
-        if [ -f "Teak.xm" ]; then
-          mv -v Teak.xm Tweak.xm
-        fi
+        if [ -f "Teak.xm" ]; then mv -v Teak.xm Tweak.xm; fi
 
-        echo "=== 2. Fixing Tweak.xm Compilation Errors & Warnings ==="
+        echo "=== 2. Rebuilding Missing Hooks & Applying Root Fixes ==="
         if [ -f "Tweak.xm" ]; then
           if ! grep -q "<UIKit/UIKit.h>" Tweak.xm; then
             sed -i '' '1i\
-            #import <UIKit/UIKit.h>
-            ' Tweak.xm
-          fi
-          
-          if ! grep -q "BlackUIBridge" Tweak.xm; then
-            sed -i '' '2i\
+            #import <UIKit/UIKit.h>\
             @interface BlackUIBridge : NSObject\
             + (void)showProtectionUI;\
             @end\
@@ -48,27 +188,27 @@ jobs:
           
           sed -i '' 's|"fishhook/fishhook.h"|"fishhook.h"|g' Tweak.xm
           sed -i '' 's|<fishhook/fishhook.h>|"fishhook.h"|g' Tweak.xm
-
-          sed -i '' '/(\*orig_/s/static /static __attribute__((unused)) /g' Tweak.xm
-
-          sed -i '' 's/, hooked_/, (void *)hooked_/g' Tweak.xm
-          sed -i '' 's/, (void \*)&orig_/, (void **)\&orig_/g' Tweak.xm
-          sed -i '' 's/, &orig_/, (void **)\&orig_/g' Tweak.xm
-
-          sed -i '' 's/{"RSA_private_decrypt", (void \*)hooked_RSA_private$/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void **)\&orig_RSA_private_decrypt},/g' Tweak.xm
-          sed -i '' 's/{"RSA_private_decrypt", (void \*)hooked_RSA_private\s/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void **)\&orig_RSA_private_decrypt},/g' Tweak.xm
-          
           sed -i '' 's/void \*libSystem = dlopen/dlopen/g' Tweak.xm
+
+          # الخطوة الجوهرية: حذف المصفوفة المقطوعة والمعطوبة من الكود
+          sed -i '' '/struct rebinding bindings/,$d' Tweak.xm
           
-          if ! grep -q "rebind_symbols(bindings" Tweak.xm; then
-            cat << 'EOF' >> Tweak.xm
-            {"RSA_public_encrypt", (void *)hooked_RSA_public_encrypt, (void **)&orig_RSA_public_encrypt},
-            {"RSA_public_decrypt", (void *)hooked_RSA_public_decrypt, (void **)&orig_RSA_public_decrypt},
-            {"RSA_sign", (void *)hooked_RSA_sign, (void **)&orig_RSA_sign},
-            {"RSA_verify", (void *)hooked_RSA_verify, (void **)&orig_RSA_verify}
+          # إعادة بناء المصفوفة ديناميكياً لتشمل جميع الدوال الـ 60+ المهملة سابقاً
+          echo "        struct rebinding bindings[] = {" >> Tweak.xm
+          
+          grep -oE 'hooked_[a-zA-Z0-9_]+\(' Tweak.xm | sed 's/(//g' | sort | uniq | while read hook_name; do
+              func_name="${hook_name#hooked_}"
+              orig_name="orig_${func_name}"
+              if grep -q "$orig_name" Tweak.xm; then
+                  echo "            {\"$func_name\", (void *)$hook_name, (void **)&${orig_name}}," >> Tweak.xm
+              fi
+          done
+          
+          # إغلاق المصفوفة واستدعاء الواجهة الزجاجية
+          cat << 'EOF' >> Tweak.xm
         };
         rebind_symbols(bindings, sizeof(bindings)/sizeof(struct rebinding));
-        NSLog(@"[ShadowTrackerBypass] Fishhook bindings applied successfully!");
+        NSLog(@"[ShadowTrackerBypass] ULTIMATE: All Fishhook bindings completely restored and applied!");
         
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [BlackUIBridge showProtectionUI];
@@ -77,31 +217,39 @@ jobs:
         } // End of @autoreleasepool
         } // End of constructor
         EOF
-          fi
         fi
 
-        echo "=== 3. Converting to Jailed Setup & Swift Linking ==="
+        echo "=== 3. Cleaning Makefile (Root Fix for Framework Warnings) ==="
         if [ -f "Makefile" ]; then
-          sed -i '' 's|fishhook/fishhook.c|fishhook.c|g' Makefile
           sed -i '' '/THEOS_PACKAGE_SCHEME/d' Makefile
           sed -i '' 's/-lsubstrate//g' Makefile
-          sed -i '' 's/TWEAK_NAME/LIBRARY_NAME/g' Makefile
           sed -i '' 's/tweak.mk/library.mk/g' Makefile
           sed -i '' 's/iphone:14.0:latest/iphone:clang:latest:14.0/g' Makefile
           sed -i '' '/after-install::/,$d' Makefile
+          
+          # الحل الجذري: إزالة جميع الأعلام القديمة والمكاتب غير المستخدمة نهائياً
           sed -i '' 's/-Wl,-multiply_defined,suppress//g' Makefile
+          sed -i '' 's/ Security//g' Makefile
+          sed -i '' 's/Security //g' Makefile
+          sed -i '' 's/ AdSupport//g' Makefile
+          sed -i '' 's/AdSupport //g' Makefile
+          sed -i '' 's/ AppTrackingTransparency//g' Makefile
+          sed -i '' 's/AppTrackingTransparency //g' Makefile
+          sed -i '' 's/-lz//g' Makefile
+
+          # إعادة الهيكلة للدمج مع Swift بطريقة آمنة
+          sed -i '' '/_FILES/d' Makefile
+          sed -i '' '/_FRAMEWORKS/d' Makefile
+          sed -i '' '/LIBRARY_NAME/d' Makefile
+          sed -i '' '/TWEAK_NAME/d' Makefile
           
-          # 1. إدراج ملف سويفت بجانب Tweak.xm
-          sed -i '' 's/Tweak.xm/Tweak.xm BlackUI.swift/g' Makefile
-          
-          # 2. إنشاء إعدادات Swift والمكاتب ووضعها في أعلى ملف Makefile بطريقة آمنة
           echo "SWIFT_VERSION = 5.0" > temp_make
-          echo "ShadowTrackerBypass_FRAMEWORKS = UIKit SwiftUI" >> temp_make
+          echo "LIBRARY_NAME = ShadowTrackerBypass" >> temp_make
+          echo "ShadowTrackerBypass_FILES = Tweak.xm BlackUI.swift fishhook.c" >> temp_make
+          echo "ShadowTrackerBypass_FRAMEWORKS = Foundation UIKit SwiftUI" >> temp_make
+          
           cat Makefile >> temp_make
           mv temp_make Makefile
-          
-          echo "=== Updated Makefile ==="
-          cat Makefile
         fi
 
     - name: 📦 Install System Dependencies
@@ -157,15 +305,12 @@ jobs:
         mkdir -p ${{ github.workspace }}/theos/include
         cp -v libssl.a libcrypto.a ${{ github.workspace }}/theos/lib/
         cp -rv include/openssl ${{ github.workspace }}/theos/include/
-        
-        echo "✓ Strict Native OpenSSL Compiled and Injected!"
 
     - name: 📥 Download iOS SDK (Bulletproof System)
       run: |
         mkdir -p ${{ github.workspace }}/theos/sdks
         cd ${{ github.workspace }}/theos/sdks
         
-        echo "=== Downloading iOS SDK ==="
         URLS=(
           "https://github.com/theos/sdks/releases/latest/download/iPhoneOS14.5.sdk.tar.xz"
           "https://github.com/theos/sdks/releases/latest/download/iPhoneOS15.0.sdk.tar.xz"
@@ -174,10 +319,8 @@ jobs:
         )
         SUCCESS=false
         for url in "${URLS[@]}"; do
-          echo "Trying to download from: $url"
           if wget -q -O SDK.tar.xz "$url"; then
             if file SDK.tar.xz | grep -q "XZ"; then
-              echo "✓ SUCCESS! Valid SDK archive downloaded."
               xz -d SDK.tar.xz
               tar -xf SDK.tar
               rm -f SDK.tar
@@ -192,7 +335,7 @@ jobs:
           exit 1
         fi
 
-    - name: 🔨 Compile Jailed Dylib (Production)
+    - name: 🔨 Compile Jailed Dylib (Pure Native Build)
       run: |
         make clean
         make FINALPACKAGE=1
