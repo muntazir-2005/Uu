@@ -38,7 +38,6 @@ jobs:
             ' Tweak.xm
           fi
           
-          # إدراج تعريف جسر Swift في أعلى الملف ليتعرف عليه المترجم
           if ! grep -q "BlackUIBridge" Tweak.xm; then
             sed -i '' '2i\
             @interface BlackUIBridge : NSObject\
@@ -62,7 +61,6 @@ jobs:
           sed -i '' 's/void \*libSystem = dlopen/dlopen/g' Tweak.xm
           
           if ! grep -q "rebind_symbols(bindings" Tweak.xm; then
-            # قمنا بإضافة كود استدعاء الواجهة الزجاجية هنا!
             cat << 'EOF' >> Tweak.xm
             {"RSA_public_encrypt", (void *)hooked_RSA_public_encrypt, (void **)&orig_RSA_public_encrypt},
             {"RSA_public_decrypt", (void *)hooked_RSA_public_decrypt, (void **)&orig_RSA_public_decrypt},
@@ -72,7 +70,6 @@ jobs:
         rebind_symbols(bindings, sizeof(bindings)/sizeof(struct rebinding));
         NSLog(@"[ShadowTrackerBypass] Fishhook bindings applied successfully!");
         
-        // استدعاء واجهة Swift بعد ثانيتين لضمان تحمل الشاشة الرئيسية للتطبيق
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [BlackUIBridge showProtectionUI];
         });
@@ -94,10 +91,17 @@ jobs:
           sed -i '' '/after-install::/,$d' Makefile
           sed -i '' 's/-Wl,-multiply_defined,suppress//g' Makefile
           
-          # ربط ملف Swift ومكتبات واجهة المستخدم التابعة لشركة آبل
-          echo "export SWIFT_VERSION = 5.0" >> Makefile
-          echo "ShadowTrackerBypass_FILES += BlackUI.swift" >> Makefile
-          echo "ShadowTrackerBypass_FRAMEWORKS += UIKit SwiftUI" >> Makefile
+          # 1. إدراج ملف سويفت بجانب Tweak.xm
+          sed -i '' 's/Tweak.xm/Tweak.xm BlackUI.swift/g' Makefile
+          
+          # 2. إنشاء إعدادات Swift والمكاتب ووضعها في أعلى ملف Makefile بطريقة آمنة
+          echo "SWIFT_VERSION = 5.0" > temp_make
+          echo "ShadowTrackerBypass_FRAMEWORKS = UIKit SwiftUI" >> temp_make
+          cat Makefile >> temp_make
+          mv temp_make Makefile
+          
+          echo "=== Updated Makefile ==="
+          cat Makefile
         fi
 
     - name: 📦 Install System Dependencies
@@ -109,10 +113,9 @@ jobs:
 
     - name: ⚙️ Install Theos
       run: |
-        # أداة Theos يتم تحميلها مع vendor/swift-support لدعم ترجمة سويفت
         git clone --depth=1 --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
 
-    - name: 🔐 Compile Official OpenSSL from Source
+    - name: 🔐 Compile Official OpenSSL from Source (Strict Native Build)
       run: |
         echo "=== Downloading Official OpenSSL 3.1.5 ==="
         OPENSSL_VER="3.1.5"
@@ -145,7 +148,7 @@ jobs:
         cp libssl.a libssl_arm64e.a
         cp libcrypto.a libcrypto_arm64e.a
         
-        echo "=== Merging to Universal Fat Binaries ==="
+        echo "=== Merging to Universal Fat Binaries (arm64 + arm64e) ==="
         lipo -create libssl_arm64.a libssl_arm64e.a -output libssl.a
         lipo -create libcrypto_arm64.a libcrypto_arm64e.a -output libcrypto.a
         
@@ -154,12 +157,15 @@ jobs:
         mkdir -p ${{ github.workspace }}/theos/include
         cp -v libssl.a libcrypto.a ${{ github.workspace }}/theos/lib/
         cp -rv include/openssl ${{ github.workspace }}/theos/include/
+        
+        echo "✓ Strict Native OpenSSL Compiled and Injected!"
 
     - name: 📥 Download iOS SDK (Bulletproof System)
       run: |
         mkdir -p ${{ github.workspace }}/theos/sdks
         cd ${{ github.workspace }}/theos/sdks
         
+        echo "=== Downloading iOS SDK ==="
         URLS=(
           "https://github.com/theos/sdks/releases/latest/download/iPhoneOS14.5.sdk.tar.xz"
           "https://github.com/theos/sdks/releases/latest/download/iPhoneOS15.0.sdk.tar.xz"
@@ -168,8 +174,10 @@ jobs:
         )
         SUCCESS=false
         for url in "${URLS[@]}"; do
+          echo "Trying to download from: $url"
           if wget -q -O SDK.tar.xz "$url"; then
             if file SDK.tar.xz | grep -q "XZ"; then
+              echo "✓ SUCCESS! Valid SDK archive downloaded."
               xz -d SDK.tar.xz
               tar -xf SDK.tar
               rm -f SDK.tar
