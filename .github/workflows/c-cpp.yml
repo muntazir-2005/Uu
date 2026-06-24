@@ -1,4 +1,4 @@
-name: CI - Ultimate Jailed Pipeline (Perfect Syntax Engine)
+name: CI - Ultimate Jailed Pipeline (Perfect Clean Build)
 
 on:
   push:
@@ -193,40 +193,40 @@ jobs:
         content = content.replace('"fishhook/fishhook.h"', '"fishhook.h"')
         content = content.replace('<fishhook/fishhook.h>', '"fishhook.h"')
 
-        # 1. قص الملف قبل أي دالة تشغيل معطوبة أو مصفوفة مقطوعة
-        cut_idx = len(content)
-        for marker in ["%ctor", "struct rebinding bindings", "__attribute__((constructor))"]:
+        # 1. إزالة أي بقايا سابقة لتجنب تداخل الأقواس (قطع الملف بشكل صارم ونظيف)
+        idxs = []
+        for marker in ["%ctor", "struct rebinding bindings", "__attribute__((constructor))", "static __attribute__((constructor))"]:
             idx = content.find(marker)
-            if idx != -1 and idx < cut_idx:
-                cut_idx = idx
+            if idx != -1:
+                idxs.append(idx)
 
-        clean_content = content[:cut_idx]
+        if idxs:
+            content = content[:min(idxs)]
 
-        # 2. الموازنة الذكية للأقواس: نعد الأقواس المفتوحة والمغلقة، ونغلق الناقص منها!
-        # هذا يضمن 100% أننا في الـ Global Scope ولن يحدث خطأ (function definition is not allowed here)
-        open_braces = clean_content.count('{')
-        close_braces = clean_content.count('}')
-        if open_braces > close_braces:
-            clean_content += '\n}' * (open_braces - close_braces)
+        # 2. حل مشكلة الاقتطاع بمسح أي كود غير مكتمل في آخر الملف
+        last_brace = content.rfind('}')
+        if last_brace != -1:
+            content = content[:last_brace+1]
 
-        # 3. استخراج دوال التخطي من الكود السليم فقط
-        hooks = list(set(re.findall(r'hooked_([a-zA-Z0-9_]+)', clean_content)))
-
+        # 3. استخراج دوالك الأصلية بدقة
+        origs = re.findall(r'\(\*orig_([a-zA-Z0-9_]+)\)', content)
         c_hooks = []
         objc_hooks = []
 
-        for hook in hooks:
-            if f"orig_{hook}" in clean_content:
-                if re.search(fr'hooked_{hook}\s*\(\s*(__strong\s*)?id\s+self\s*,\s*SEL', clean_content):
+        for hook in set(origs):
+            if f"hooked_{hook}" in content:
+                sig_match = re.search(fr'hooked_{hook}\s*\([^)]+\)', content)
+                if sig_match and "id self" in sig_match.group(0) and "SEL " in sig_match.group(0):
                     objc_hooks.append(hook)
                 else:
                     c_hooks.append(hook)
 
-        # 4. بناء المحرك النهائي بدون تكرار تعريفات
+        # 4. بناء المحرك في بيئة عالمية (Global Scope)
         engine = "\n\n// --- ULTIMATE DYNAMIC ENGINE ---\n"
         engine += """
         static void swizzleSelectorEverywhere(NSString *selName, void *newImpl, void *origImplPrefix) {
             SEL selector = NSSelectorFromString(selName);
+            if (!selector) return;
             int numClasses = objc_getClassList(NULL, 0);
             if (numClasses > 0) {
                 Class *classes = (Class *)malloc(sizeof(Class) * numClasses);
@@ -237,7 +237,7 @@ jobs:
                     if (m) {
                         IMP orig = method_getImplementation(m);
                         if (orig != (IMP)newImpl) {
-                            if (origImplPrefix) { *(IMP *)origImplPrefix = orig; }
+                            if (origImplPrefix && *(IMP *)origImplPrefix == NULL) { *(IMP *)origImplPrefix = orig; }
                             method_setImplementation(m, (IMP)newImpl);
                         }
                     }
@@ -245,7 +245,7 @@ jobs:
                     if (mClass) {
                         IMP orig = method_getImplementation(mClass);
                         if (orig != (IMP)newImpl) {
-                            if (origImplPrefix) { *(IMP *)origImplPrefix = orig; }
+                            if (origImplPrefix && *(IMP *)origImplPrefix == NULL) { *(IMP *)origImplPrefix = orig; }
                             method_setImplementation(mClass, (IMP)newImpl);
                         }
                     }
@@ -253,15 +253,27 @@ jobs:
                 free(classes);
             }
         }
+
+        __attribute__((constructor)) static void init_ultimate_bypass_engine_v3() {
+            @autoreleasepool {
+                NSLog(@"[ShadowTrackerBypass] Engine Starting...");
         """
 
-        engine += "__attribute__((constructor)) static void init_ultimate_bypass_engine_v2() {\n"
-        engine += "    @autoreleasepool {\n"
-        engine += '        NSLog(@"[ShadowTrackerBypass] Engine Starting...");\n'
+        # خريطة دوال الأوبجكتيف-سي لمنع أي أخطاء في الـ Selectors
+        selector_map = {
+            "fileExistsAtPath": "fileExistsAtPath:",
+            "fileExistsAtPath_isDirectory": "fileExistsAtPath:isDirectory:",
+            "report_start_event": "report_start_event:",
+            "report_system_event": "report_system_event:",
+            "report_user_event": "report_user_event:",
+            "report_debug_log": "report_debug_log:",
+            "GSDKInnerSaveFPS": "GSDKInnerSaveFPS:",
+            "NotifyPufferIOSBGDownloadUpdate": "NotifyPufferIOSBGDownloadUpdate:"
+        }
 
-        if objc_hooks:
-            for hook in objc_hooks:
-                engine += f'        swizzleSelectorEverywhere(@"{hook}", (void *)hooked_{hook}, (void **)&orig_{hook});\n'
+        for hook in objc_hooks:
+            sel = selector_map.get(hook, hook)
+            engine += f'        swizzleSelectorEverywhere(@"{sel}", (void *)hooked_{hook}, (void **)&orig_{hook});\n'
 
         if c_hooks:
             engine += "        struct rebinding bindings[] = {\n"
@@ -271,24 +283,37 @@ jobs:
             engine += f"        rebind_symbols(bindings, {len(c_hooks)});\n"
 
         engine += """
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                Class uiClass = NSClassFromString(@"BlackUIBridge");
-                if (uiClass) {
-                    [uiClass performSelector:@selector(showProtectionUI)];
-                }
-            });
-        }
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    Class uiClass = NSClassFromString(@"BlackUIBridge");
+                    if (uiClass) {
+                        [uiClass performSelector:@selector(showProtectionUI)];
+                    }
+                });
+            }
         }
         """
 
         with open("Tweak.xm", "w", encoding="utf-8") as f:
-            f.write(clean_content + engine)
+            f.write(content + engine)
             
-        print(f"SUCCESS! Balanced {open_braces - close_braces} braces. Routed: {len(c_hooks)} C | {len(objc_hooks)} Obj-C.")
+        print(f"SUCCESS! Cleaned file. Routed: {len(c_hooks)} C | {len(objc_hooks)} Obj-C.")
         PY_EOF
 
         echo "=== 3. Executing Smart Parser ==="
         python3 fix_tweak.py
+
+    - name: 📦 Install System Dependencies & Theos
+      run: |
+        brew install make llvm ldid xz wget coreutils
+        mkdir -p $HOME/.local/bin
+        ln -s $(which gmake) $HOME/.local/bin/make
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        git clone --depth=1 --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
+
+    - name: 🛠️ Patch Theos Linker Warnings
+      run: |
+        echo "=== Removing obsolete flags from Theos ==="
+        find ${{ github.workspace }}/theos/makefiles -type f -name "*.mk" -exec sed -i '' 's/-Wl,-multiply_defined,suppress//g' {} +
 
     - name: 🛠️ Rewrite Clean Makefile
       run: |
@@ -304,23 +329,11 @@ jobs:
         ShadowTrackerBypass_FILES = Tweak.xm BlackUI.swift fishhook.c
         ShadowTrackerBypass_FRAMEWORKS = Foundation UIKit SwiftUI Security AdSupport AppTrackingTransparency
         
-        # -w يُسكت جميع التحذيرات المزعجة ويمنع المترجم من التوقف بسببها
         ShadowTrackerBypass_CFLAGS = -fobjc-arc -w
-        ShadowTrackerBypass_LDFLAGS = -Wl,-no_warn_inits
+        ShadowTrackerBypass_LDFLAGS = -Wl,-no_warn_inits -Wl,-w
         
         include $(THEOS_MAKE_PATH)/library.mk
         EOF
-
-    - name: 📦 Install System Dependencies
-      run: |
-        brew install make llvm ldid xz wget coreutils
-        mkdir -p $HOME/.local/bin
-        ln -s $(which gmake) $HOME/.local/bin/make
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-    - name: ⚙️ Install Theos
-      run: |
-        git clone --depth=1 --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
 
     - name: 🔐 Compile Official OpenSSL from Source
       run: |
