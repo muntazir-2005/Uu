@@ -1,4 +1,4 @@
-name: CI - Ultimate Jailed Pipeline (Final Syntax Fix)
+name: CI - Ultimate Jailed Pipeline (Smart Python Engine)
 
 on:
   push:
@@ -166,7 +166,7 @@ jobs:
         }
         EOF
 
-    - name: 🛠️ Run Python Engine to Fix Tweak.xm (Syntax & Truncation Fix)
+    - name: 🛠️ Create & Execute Smart Python Hook Engine
       run: |
         echo "=== 1. Securing Fishhook Library ==="
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.c
@@ -174,14 +174,14 @@ jobs:
         
         if [ -f "Teak.xm" ]; then mv -v Teak.xm Tweak.xm; fi
         
-        echo "=== 2. Rebuilding Tweak.xm Automatically via Python ==="
-        python3 -c '
+        echo "=== 2. Generating 'fix_tweak.py' ==="
+        cat << 'PY_EOF' > fix_tweak.py
         import re
-        
+
         try:
             with open("Tweak.xm", "r", encoding="utf-8") as f:
                 content = f.read()
-        except:
+        except UnicodeDecodeError:
             with open("Tweak.xm", "r", encoding="latin-1") as f:
                 content = f.read()
 
@@ -189,47 +189,52 @@ jobs:
         if "<UIKit/UIKit.h>" not in content:
             content = "#import <UIKit/UIKit.h>\n" + content
         
-        content = content.replace("\"fishhook/fishhook.h\"", "\"fishhook.h\"")
-        content = content.replace("<fishhook/fishhook.h>", "\"fishhook.h\"")
-        
-        # 2. استخراج جميع الدوال قبل القص
-        hooks = list(set(re.findall(r"hooked_([a-zA-Z0-9_]+)\(", content)))
-        
-        # 3. العثور على مصفوفة bindings الأصلية وقطع الملف هناك للحفاظ على الأقواس الأصلية المفتوحة
-        idx = content.find("struct rebinding bindings")
-        if idx != -1:
-            content = content[:idx]
-        
-        # 4. حقن المصفوفة الذكية بدون إنشاء دالة جديدة
-        injection = "struct rebinding bindings[] = {\n"
-        
+        content = content.replace('"fishhook/fishhook.h"', '"fishhook.h"')
+        content = content.replace('<fishhook/fishhook.h>', '"fishhook.h"')
+
+        # 2. البحث عن نقطة القطع الآمنة داخل الـ Constructor الحالي
+        cut_idx = content.find("struct rebinding bindings")
+        if cut_idx != -1:
+            safe_content = content[:cut_idx]
+        else:
+            safe_content = content
+
+        # 3. استخراج جميع الدوال المترابطة (Hooks)
+        hooks = list(set(re.findall(r"hooked_([a-zA-Z0-9_]+)\(", safe_content)))
+
+        # 4. بناء المصفوفة الجديدة بدلاً من المقطوعة
+        injection = "    struct rebinding bindings[] = {\n"
         count = 0
         for hook in hooks:
-            if f"orig_{hook}" in content:
-                injection += f"        {{\"{hook}\", (void *)hooked_{hook}, (void **)&orig_{hook}}},\n"
+            if f"orig_{hook}" in safe_content:
+                injection += f'        {{"{hook}", (void *)hooked_{hook}, (void **)&orig_{hook}}},\n'
                 count += 1
         
         injection += "    };\n"
         injection += f"    if ({count} > 0) {{\n"
         injection += f"        rebind_symbols(bindings, {count});\n"
         injection += "    }\n"
-        injection += f"    NSLog(@\"[ShadowTrackerBypass] Ultimate Fishhook Loaded with {count} hooks!\");\n"
-        
-        # 5. استدعاء واجهة سويفت عبر Objective-C Runtime
+        injection += f'    NSLog(@"[ShadowTrackerBypass] Ultimate Fishhook Loaded with {count} hooks!");\n'
+
+        # 5. استدعاء واجهة سويفت ديناميكياً
         injection += "    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{\n"
-        injection += "        Class uiClass = NSClassFromString(@\"BlackUIBridge\");\n"
+        injection += '        Class uiClass = NSClassFromString(@"BlackUIBridge");\n'
         injection += "        if (uiClass) {\n"
         injection += "            [uiClass performSelector:@selector(showProtectionUI)];\n"
         injection += "        }\n"
         injection += "    });\n"
-        
-        # 6. إغلاق الأقواس الأصلية الخاصة بـ @autoreleasepool و %ctor بأمان تام
+
+        # 6. إغلاق الـ @autoreleasepool والـ constructor بأمان
         injection += "}\n}\n"
-        
+
         with open("Tweak.xm", "w", encoding="utf-8") as f:
-            f.write(content + injection)
-        '
-        echo "Python script successfully wrote a perfect Tweak.xm!"
+            f.write(safe_content + injection)
+            
+        print(f"SUCCESS: Python script executed! Parsed {count} hooks and fixed syntax.")
+        PY_EOF
+
+        echo "=== 3. Executing Python Engine ==="
+        python3 fix_tweak.py
 
     - name: 🛠️ Rewrite Clean Makefile
       run: |
