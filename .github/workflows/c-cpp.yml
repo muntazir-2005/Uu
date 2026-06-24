@@ -1,4 +1,4 @@
-name: CI - Ultimate Jailed Pipeline (Auto-Fix & Fishhook)
+name: CI - Ultimate Jailed Pipeline (Strict Full Build)
 
 on:
   push:
@@ -9,7 +9,7 @@ jobs:
   build_jailed_dylib:
     name: Build Jailed Dylib
     runs-on: macos-14
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
     - name: Checkout Repository
@@ -32,47 +32,35 @@ jobs:
 
         echo "=== 2. Fixing Tweak.xm Compilation Errors & Warnings ==="
         if [ -f "Tweak.xm" ]; then
-          # 1. إضافة مكتبة UIKit لتجنب خطأ expected a type
           if ! grep -q "<UIKit/UIKit.h>" Tweak.xm; then
             sed -i '' '1i\
             #import <UIKit/UIKit.h>
             ' Tweak.xm
           fi
           
-          # 2. تصحيح مسار استدعاء fishhook
           sed -i '' 's|"fishhook/fishhook.h"|"fishhook.h"|g' Tweak.xm
           sed -i '' 's|<fishhook/fishhook.h>|"fishhook.h"|g' Tweak.xm
 
-          # 3. الحل الجذري لتحذيرات [-Wunused-variable] عبر إضافة __attribute__((unused))
-          # هذا الأمر يبحث عن أي سطر يحتوي على تعريف متغير orig_ ويخبر المترجم بتجاهل عدم استخدامه
           sed -i '' '/(\*orig_/s/static /static __attribute__((unused)) /g' Tweak.xm
 
-          # 4. إصلاح مشكلة C++ strict casting في جميع دوال fishhook
           sed -i '' 's/, hooked_/, (void *)hooked_/g' Tweak.xm
           sed -i '' 's/, (void \*)&orig_/, (void **)\&orig_/g' Tweak.xm
           sed -i '' 's/, &orig_/, (void **)\&orig_/g' Tweak.xm
 
-          # 5. إصلاح السطر 1476 المقطوع في الملف
           sed -i '' 's/{"RSA_private_decrypt", (void \*)hooked_RSA_private$/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void **)\&orig_RSA_private_decrypt},/g' Tweak.xm
           sed -i '' 's/{"RSA_private_decrypt", (void \*)hooked_RSA_private\s/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void **)\&orig_RSA_private_decrypt},/g' Tweak.xm
           
-          # 6. إزالة المتغير غير المستخدم (libSystem) تماماً لمنع الخطأ القاتل
           sed -i '' 's/void \*libSystem = dlopen/dlopen/g' Tweak.xm
           
-          # 7. إكمال الملف المقطوع وإغلاق الأقواس بشكل صحيح
           if ! grep -q "rebind_symbols(bindings" Tweak.xm; then
             cat << 'EOF' >> Tweak.xm
-            // إكمال بقية المصفوفة
             {"RSA_public_encrypt", (void *)hooked_RSA_public_encrypt, (void **)&orig_RSA_public_encrypt},
             {"RSA_public_decrypt", (void *)hooked_RSA_public_decrypt, (void **)&orig_RSA_public_decrypt},
             {"RSA_sign", (void *)hooked_RSA_sign, (void **)&orig_RSA_sign},
             {"RSA_verify", (void *)hooked_RSA_verify, (void **)&orig_RSA_verify}
         };
-        
-        // تفعيل دوال Fishhook
         rebind_symbols(bindings, sizeof(bindings)/sizeof(struct rebinding));
         NSLog(@"[ShadowTrackerBypass] Fishhook bindings applied successfully!");
-        
         } // End of @autoreleasepool
         } // End of constructor
         EOF
@@ -88,11 +76,14 @@ jobs:
           sed -i '' 's/tweak.mk/library.mk/g' Makefile
           sed -i '' 's/iphone:14.0:latest/iphone:clang:latest:14.0/g' Makefile
           sed -i '' '/after-install::/,$d' Makefile
+          
+          # إزالة تحذير -multiply_defined القديم إن وُجد لضمان نظافة السجل
+          sed -i '' 's/-Wl,-multiply_defined,suppress//g' Makefile
         fi
 
     - name: 📦 Install System Dependencies
       run: |
-        brew install make llvm ldid xz wget
+        brew install make llvm ldid xz wget coreutils
         mkdir -p $HOME/.local/bin
         ln -s $(which gmake) $HOME/.local/bin/make
         echo "$HOME/.local/bin" >> $GITHUB_PATH
@@ -101,22 +92,45 @@ jobs:
       run: |
         git clone --depth=1 --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
 
+    - name: 🔐 Compile OpenSSL Static Libraries (Strict Full Build)
+      run: |
+        echo "=== Downloading and Building OpenSSL for iOS (No Bypass) ==="
+        git clone --depth 1 https://github.com/jasonacox/Build-OpenSSL-cURL.git /tmp/build-openssl
+        cd /tmp/build-openssl
+        
+        # تجميع OpenSSL بنسخته الكاملة لمعمارية iOS فقط
+        ./build.sh -p ios -e
+        
+        echo "=== Integrating OpenSSL into Theos SDK ==="
+        mkdir -p ${{ github.workspace }}/theos/lib
+        mkdir -p ${{ github.workspace }}/theos/include/openssl
+        
+        # حقن ملفات التجميع المكتملة في قلب Theos
+        if [ -d "openssl/iOS-fat/lib" ]; then
+          echo "Found Fat Binaries..."
+          cp -v openssl/iOS-fat/lib/*.a ${{ github.workspace }}/theos/lib/
+          cp -rv openssl/iOS-fat/include/openssl/* ${{ github.workspace }}/theos/include/openssl/
+        else
+          echo "Found Standard Binaries..."
+          cp -v openssl/iOS/lib/*.a ${{ github.workspace }}/theos/lib/
+          cp -rv openssl/iOS/include/openssl/* ${{ github.workspace }}/theos/include/openssl/
+        fi
+        
+        echo "✓ OpenSSL Compiled and Integrated Successfully!"
+
     - name: 📥 Download iOS SDK (Bulletproof System)
       run: |
         mkdir -p ${{ github.workspace }}/theos/sdks
         cd ${{ github.workspace }}/theos/sdks
         
         echo "=== Downloading iOS SDK ==="
-        
         URLS=(
           "https://github.com/theos/sdks/releases/latest/download/iPhoneOS14.5.sdk.tar.xz"
           "https://github.com/theos/sdks/releases/latest/download/iPhoneOS15.0.sdk.tar.xz"
           "https://github.com/theos/sdks/releases/latest/download/iPhoneOS14.4.sdk.tar.xz"
           "https://github.com/xybp888/iOS-SDKs/releases/download/iOS-SDKs/iPhoneOS14.5.sdk.tar.xz"
         )
-        
         SUCCESS=false
-        
         for url in "${URLS[@]}"; do
           echo "Trying to download from: $url"
           if wget -q -O SDK.tar.xz "$url"; then
@@ -127,15 +141,10 @@ jobs:
               rm -f SDK.tar
               SUCCESS=true
               break
-            else
-              echo "✗ File is not a valid XZ archive. Trying next..."
             fi
-          else
-            echo "✗ Download failed completely. Trying next..."
           fi
           rm -f SDK.tar.xz SDK.tar
         done
-        
         if [ "$SUCCESS" = false ]; then
           echo "❌ Fatal Error: All SDK download mirrors failed!"
           exit 1
@@ -144,7 +153,6 @@ jobs:
     - name: 🔨 Compile Jailed Dylib (Production)
       run: |
         make clean
-        # بناء طبيعي وصارم جداً بدون أي تخطي للتحذيرات!
         make FINALPACKAGE=1
 
     - name: 📁 Collect Output
