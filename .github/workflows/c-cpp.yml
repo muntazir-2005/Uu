@@ -199,22 +199,31 @@ jobs:
         idx2 = content.find("struct rebinding bindings")
         if idx2 != -1: content = content[:idx2]
         
-        # 3. Find every single hooked function dynamically
+        # 3. FIX TRUNCATION: Find the last valid closing brace to drop broken/cut-off text
+        last_brace = content.rfind("}")
+        if last_brace != -1:
+            content = content[:last_brace+1]
+        
+        # 4. Find every single hooked function dynamically
         hooks = list(set(re.findall(r"hooked_([a-zA-Z0-9_]+)\(", content)))
         
-        # 4. Generate a bulletproof constructor
+        # 5. Generate a bulletproof constructor
         constructor = "\n\n__attribute__((constructor)) static void initialize_all_hooks() {\n"
         constructor += "    struct rebinding bindings[] = {\n"
         
+        count = 0
         for hook in hooks:
             if f"orig_{hook}" in content:
                 constructor += f"        {{\"{hook}\", (void *)hooked_{hook}, (void **)&orig_{hook}}},\n"
+                count += 1
         
         constructor += "    };\n"
-        constructor += "    rebind_symbols(bindings, sizeof(bindings)/sizeof(struct rebinding));\n"
-        constructor += "    NSLog(@\"[ShadowTrackerBypass] Ultimate Fishhook Loaded!\");\n"
+        constructor += f"    if ({count} > 0) {{\n"
+        constructor += f"        rebind_symbols(bindings, {count});\n"
+        constructor += "    }\n"
+        constructor += f"    NSLog(@\"[ShadowTrackerBypass] Ultimate Fishhook Loaded with {count} hooks!\");\n"
         
-        # 5. Call SwiftUI dynamically using Objective-C Runtime (Bypasses Linker Errors entirely!)
+        # 6. Call SwiftUI dynamically using Objective-C Runtime (Bypasses Linker Errors entirely!)
         constructor += "    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{\n"
         constructor += "        Class uiClass = NSClassFromString(@\"BlackUIBridge\");\n"
         constructor += "        if (uiClass) {\n"
