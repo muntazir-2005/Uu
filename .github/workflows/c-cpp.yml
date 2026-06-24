@@ -20,20 +20,65 @@ jobs:
         echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
         echo "MAKEFLAGS=-j$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
 
-    - name: 🛠️ Auto-Fix Repository & Code
+        - name: 🛠️ Auto-Fix Repository & Code (Force Fix)
       run: |
         echo "=== 1. Securing Fishhook Library ==="
-        # تحميل ملفات fishhook الرسمية مباشرة إلى المجلد الرئيسي لضمان وجودها
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.c
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.h
-        echo "✓ Downloaded official fishhook.c and fishhook.h"
-
-        echo "=== 2. Fixing File Names & Imports ==="
-        # تصحيح الخطأ الإملائي في اسم الملف إن وجد
+        
         if [ -f "Teak.xm" ]; then
           mv -v Teak.xm Tweak.xm
-          echo "✓ Renamed Teak.xm to Tweak.xm"
         fi
+
+        echo "=== 2. Fixing Tweak.xm Compilation Errors ==="
+        if [ -f "Tweak.xm" ]; then
+          # 1. إصلاح خطأ (expected a type) عبر إضافة مكتبة UIKit في السطر الأول
+          if ! grep -q "<UIKit/UIKit.h>" Tweak.xm; then
+            sed -i '' '1i\
+            #import <UIKit/UIKit.h>
+            ' Tweak.xm
+          fi
+          
+          # 2. تصحيح مسار استدعاء fishhook
+          sed -i '' 's|"fishhook/fishhook.h"|"fishhook.h"|g' Tweak.xm
+          sed -i '' 's|<fishhook/fishhook.h>|"fishhook.h"|g' Tweak.xm
+
+          # 3. إصلاح السطر 1476 المقطوع والخطأ في اسم المتغير
+          sed -i '' 's/{"RSA_private_decrypt", hooked_RSA_private$/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void *)\&orig_RSA_private_decrypt},/g' Tweak.xm
+          sed -i '' 's/{"RSA_private_decrypt", hooked_RSA_private\s/{"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void *)\&orig_RSA_private_decrypt},/g' Tweak.xm
+          
+          # 4. إكمال الملف المقطوع وإغلاق الأقواس (autoreleasepool و constructor)
+          # نستخدم grep لنتأكد أننا لا نضيفها مرتين في حال حاولت بناء الملف أكثر من مرة
+          if ! grep -q "rebind_symbols(bindings" Tweak.xm; then
+            cat << 'EOF' >> Tweak.xm
+            // إكمال بقية المصفوفة التي انقطعت
+            {"RSA_public_encrypt", (void *)hooked_RSA_public_encrypt, (void *)&orig_RSA_public_encrypt},
+            {"RSA_public_decrypt", (void *)hooked_RSA_public_decrypt, (void *)&orig_RSA_public_decrypt},
+            {"RSA_sign", (void *)hooked_RSA_sign, (void *)&orig_RSA_sign},
+            {"RSA_verify", (void *)hooked_RSA_verify, (void *)&orig_RSA_verify}
+        };
+        
+        // تفعيل دوال Fishhook نهائياً
+        rebind_symbols(bindings, sizeof(bindings)/sizeof(struct rebinding));
+        NSLog(@"[ShadowTrackerBypass] Fishhook bindings applied successfully!");
+        
+        } // End of @autoreleasepool
+        } // End of constructor
+        EOF
+          fi
+        fi
+
+        echo "=== 3. Converting to Jailed Setup ==="
+        if [ -f "Makefile" ]; then
+          sed -i '' 's|fishhook/fishhook.c|fishhook.c|g' Makefile
+          sed -i '' '/THEOS_PACKAGE_SCHEME/d' Makefile
+          sed -i '' 's/-lsubstrate//g' Makefile
+          sed -i '' 's/TWEAK_NAME/LIBRARY_NAME/g' Makefile
+          sed -i '' 's/tweak.mk/library.mk/g' Makefile
+          sed -i '' 's/iphone:14.0:latest/iphone:clang:latest:14.0/g' Makefile
+          sed -i '' '/after-install::/,$d' Makefile
+        fi
+
         
         # تصحيح مسار الاستدعاء داخل الكود المصدري (Tweak.xm)
         if [ -f "Tweak.xm" ]; then
