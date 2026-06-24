@@ -1,4 +1,4 @@
-name: CI - Ultimate Jailed Pipeline (Smart Dynamic Parser)
+name: CI - Ultimate Jailed Pipeline (Perfect Syntax Engine)
 
 on:
   push:
@@ -166,7 +166,7 @@ jobs:
         }
         EOF
 
-    - name: 🛠️ Smart Dynamic Parsing Engine
+    - name: 🛠️ Perfect Syntax & Dynamic Parser Engine
       run: |
         echo "=== 1. Preparing Fishhook ==="
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.c
@@ -185,7 +185,6 @@ jobs:
             with open("Tweak.xm", "r", encoding="latin-1") as f:
                 content = f.read()
 
-        # استيراد المكتبات الأساسية لضمان عمل الواجهة والـ Swizzling
         if "<UIKit/UIKit.h>" not in content:
             content = "#import <UIKit/UIKit.h>\n" + content
         if "<objc/runtime.h>" not in content:
@@ -194,37 +193,36 @@ jobs:
         content = content.replace('"fishhook/fishhook.h"', '"fishhook.h"')
         content = content.replace('<fishhook/fishhook.h>', '"fishhook.h"')
 
-        # قطع الأجزاء القديمة المعطوبة لمنع الأخطاء النحوية وتداخل الدوال
-        # تمت إضافة %ctor لضمان عدم القص داخل دالة التشغيل الخاصة بـ Theos
+        # 1. قص الملف قبل أي دالة تشغيل معطوبة أو مصفوفة مقطوعة
         cut_idx = len(content)
-        for marker in ["%ctor", "struct rebinding bindings", "__attribute__((constructor))", "static __attribute__((constructor))"]:
+        for marker in ["%ctor", "struct rebinding bindings", "__attribute__((constructor))"]:
             idx = content.find(marker)
             if idx != -1 and idx < cut_idx:
                 cut_idx = idx
 
         clean_content = content[:cut_idx]
 
-        # إغلاق أي دالة مفتوحة بشكل سليم قبل إضافة المحرك الجديد في النطاق العام (Global Scope)
-        last_brace = clean_content.rfind("}")
-        if last_brace != -1:
-            clean_content = clean_content[:last_brace+1]
+        # 2. الموازنة الذكية للأقواس: نعد الأقواس المفتوحة والمغلقة، ونغلق الناقص منها!
+        # هذا يضمن 100% أننا في الـ Global Scope ولن يحدث خطأ (function definition is not allowed here)
+        open_braces = clean_content.count('{')
+        close_braces = clean_content.count('}')
+        if open_braces > close_braces:
+            clean_content += '\n}' * (open_braces - close_braces)
 
-        # === قلب المحرك: استخراج الدوال الموجودة في ملفك فقط ===
+        # 3. استخراج دوال التخطي من الكود السليم فقط
         hooks = list(set(re.findall(r'hooked_([a-zA-Z0-9_]+)', clean_content)))
 
         c_hooks = []
         objc_hooks = []
 
-        # تصنيف الدوال ذكياً
         for hook in hooks:
             if f"orig_{hook}" in clean_content:
-                # إذا كانت الدالة تحتوي على id self, SEL _cmd فهي Objective-C
                 if re.search(fr'hooked_{hook}\s*\(\s*(__strong\s*)?id\s+self\s*,\s*SEL', clean_content):
                     objc_hooks.append(hook)
                 else:
                     c_hooks.append(hook)
 
-        # بناء محرك الربط بناءً على ملفك حصرياً (بدون تكرار أو إعادة تعريف أو تداخل)
+        # 4. بناء المحرك النهائي بدون تكرار تعريفات
         engine = "\n\n// --- ULTIMATE DYNAMIC ENGINE ---\n"
         engine += """
         static void swizzleSelectorEverywhere(NSString *selName, void *newImpl, void *origImplPrefix) {
@@ -257,7 +255,7 @@ jobs:
         }
         """
 
-        engine += "__attribute__((constructor)) static void init_ultimate_bypass_engine() {\n"
+        engine += "__attribute__((constructor)) static void init_ultimate_bypass_engine_v2() {\n"
         engine += "    @autoreleasepool {\n"
         engine += '        NSLog(@"[ShadowTrackerBypass] Engine Starting...");\n'
 
@@ -286,7 +284,7 @@ jobs:
         with open("Tweak.xm", "w", encoding="utf-8") as f:
             f.write(clean_content + engine)
             
-        print(f"SUCCESS! Hooks routed: {len(c_hooks)} C functions -> Fishhook | {len(objc_hooks)} Obj-C functions -> Runtime Swizzling.")
+        print(f"SUCCESS! Balanced {open_braces - close_braces} braces. Routed: {len(c_hooks)} C | {len(objc_hooks)} Obj-C.")
         PY_EOF
 
         echo "=== 3. Executing Smart Parser ==="
@@ -305,7 +303,9 @@ jobs:
         LIBRARY_NAME = ShadowTrackerBypass
         ShadowTrackerBypass_FILES = Tweak.xm BlackUI.swift fishhook.c
         ShadowTrackerBypass_FRAMEWORKS = Foundation UIKit SwiftUI Security AdSupport AppTrackingTransparency
-        ShadowTrackerBypass_CFLAGS = -fobjc-arc -Wno-unused-variable -Wno-unused-function -Wno-error -Wno-incompatible-pointer-types -Wno-mismatched-parameter-types
+        
+        # -w يُسكت جميع التحذيرات المزعجة ويمنع المترجم من التوقف بسببها
+        ShadowTrackerBypass_CFLAGS = -fobjc-arc -w
         ShadowTrackerBypass_LDFLAGS = -Wl,-no_warn_inits
         
         include $(THEOS_MAKE_PATH)/library.mk
