@@ -79,30 +79,6 @@ jobs:
           sed -i '' '/after-install::/,$d' Makefile
         fi
 
-        
-        # تصحيح مسار الاستدعاء داخل الكود المصدري (Tweak.xm)
-        if [ -f "Tweak.xm" ]; then
-          sed -i '' 's|"fishhook/fishhook.h"|"fishhook.h"|g' Tweak.xm
-          sed -i '' 's|<fishhook/fishhook.h>|"fishhook.h"|g' Tweak.xm
-          echo "✓ Fixed fishhook imports inside Tweak.xm"
-        fi
-
-        # تصحيح مسار مكتبة fishhook في Makefile
-        if [ -f "Makefile" ]; then
-          sed -i '' 's|fishhook/fishhook.c|fishhook.c|g' Makefile
-          echo "✓ Fixed fishhook path in Makefile"
-        fi
-
-        echo "=== 3. Converting to Jailed Setup (No Jailbreak) ==="
-        if [ -f "Makefile" ]; then
-          sed -i '' '/THEOS_PACKAGE_SCHEME/d' Makefile
-          sed -i '' 's/-lsubstrate//g' Makefile
-          sed -i '' 's/TWEAK_NAME/LIBRARY_NAME/g' Makefile
-          sed -i '' 's/tweak.mk/library.mk/g' Makefile
-          sed -i '' 's/iphone:14.0:latest/iphone:clang:latest:14.0/g' Makefile
-          sed -i '' '/after-install::/,$d' Makefile
-        fi
-
         echo "=== Final Modified Makefile ==="
         cat Makefile
 
