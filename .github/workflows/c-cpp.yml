@@ -1,4 +1,4 @@
-name: CI - Ultimate Jailed Pipeline (Native Runtime Engine)
+name: CI - Ultimate Jailed Pipeline (Smart Dynamic Parser)
 
 on:
   push:
@@ -166,140 +166,67 @@ jobs:
         }
         EOF
 
-    - name: 🛠️ Sanitize & Inject Native Runtime Engine
+    - name: 🛠️ Smart Dynamic Parsing Engine
       run: |
-        echo "=== 1. Preparing Fishhook Structure ==="
-        mkdir -p fishhook
+        echo "=== 1. Preparing Fishhook ==="
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.c
         curl -sO https://raw.githubusercontent.com/facebook/fishhook/master/fishhook.h
-        cp fishhook.h fishhook/fishhook.h
         
         if [ -f "Teak.xm" ]; then mv -v Teak.xm Tweak.xm; fi
         
-        echo "=== 2. Smart Truncation via Pure Bash ==="
-        sed -i '' '/EVP_PKEY_derive/,$d' Tweak.xm
+        echo "=== 2. Creating Python Parser ==="
+        cat << 'PY_EOF' > fix_tweak.py
+        import re
 
-        echo "=== 3. Appending Native Obj-C Declarations & Switcher ==="
-        cat << 'EOF' >> Tweak.xm
+        try:
+            with open("Tweak.xm", "r", encoding="utf-8") as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            with open("Tweak.xm", "r", encoding="latin-1") as f:
+                content = f.read()
 
-        #import <objc/runtime.h>
-        #import <objc/message.h>
+        # استيراد المكتبات الأساسية لضمان عمل الواجهة والـ Swizzling
+        if "<UIKit/UIKit.h>" not in content:
+            content = "#import <UIKit/UIKit.h>\n" + content
+        if "<objc/runtime.h>" not in content:
+            content = "#import <objc/runtime.h>\n#import <objc/message.h>\n" + content
+            
+        content = content.replace('"fishhook/fishhook.h"', '"fishhook.h"')
+        content = content.replace('<fishhook/fishhook.h>', '"fishhook.h"')
 
-        // --- تعريف مؤشرات ومحاكاة دوال الـ Objective-C لمنع خطأ use of undeclared identifier ---
-        static IMP orig_integrity_detect = NULL;
-        static int hooked_integrity_detect(id self, SEL _cmd) { return 0; }
+        # قطع الأجزاء القديمة المعطوبة لمنع الأخطاء النحوية (Syntax Errors)
+        cut_idx = len(content)
+        for marker in ["struct rebinding bindings", "__attribute__((constructor))", "static __attribute__((constructor))"]:
+            idx = content.find(marker)
+            if idx != -1 and idx < cut_idx:
+                cut_idx = idx
 
-        static IMP orig_MTML_INTEGRITY_DETECT = NULL;
-        static int hooked_MTML_INTEGRITY_DETECT(id self, SEL _cmd) { return 0; }
+        clean_content = content[:cut_idx]
 
-        static IMP orig_advertisingIdentifier = NULL;
-        static id hooked_advertisingIdentifier(id self, SEL _cmd) { return nil; }
+        # إغلاق الأقواس التي تم قطعها إن وجدت
+        last_brace = clean_content.rfind("}")
+        if last_brace != -1:
+            clean_content = clean_content[:last_brace+1]
 
-        static IMP orig_trackingAuthorizationStatus = NULL;
-        static NSInteger hooked_trackingAuthorizationStatus(id self, SEL _cmd) { return 3; }
+        # === قلب المحرك: استخراج الدوال الموجودة في ملفك فقط ===
+        hooks = list(set(re.findall(r'hooked_([a-zA-Z0-9_]+)', clean_content)))
 
-        static IMP orig_fileExistsAtPath = NULL;
-        static BOOL hooked_fileExistsAtPath(id self, SEL _cmd, NSString *path) { return NO; }
+        c_hooks = []
+        objc_hooks = []
 
-        static IMP orig_fileExistsAtPath_isDirectory = NULL;
-        static BOOL hooked_fileExistsAtPath_isDirectory(id self, SEL _cmd, NSString *path, BOOL *isDir) { return NO; }
+        # تصنيف الدوال ذكياً
+        for hook in hooks:
+            if f"orig_{hook}" in clean_content:
+                # إذا كانت الدالة تحتوي على id self, SEL _cmd فهي Objective-C
+                if re.search(fr'hooked_{hook}\s*\(\s*(__strong\s*)?id\s+self\s*,\s*SEL', clean_content):
+                    objc_hooks.append(hook)
+                else:
+                    c_hooks.append(hook)
 
-        static IMP orig_GSDKPing = NULL;
-        static void hooked_GSDKPing(id self, SEL _cmd) {}
-
-        static IMP orig_GSDKPingDetect = NULL;
-        static void hooked_GSDKPingDetect(id self, SEL _cmd) {}
-
-        static IMP orig_GSDKRealTimeDetect = NULL;
-        static void hooked_GSDKRealTimeDetect(id self, SEL _cmd) {}
-
-        static IMP orig_report_start_event = NULL;
-        static void hooked_report_start_event(id self, SEL _cmd, id event) {}
-
-        static IMP orig_report_system_event = NULL;
-        static void hooked_report_system_event(id self, SEL _cmd, id event) {}
-
-        static IMP orig_report_user_event = NULL;
-        static void hooked_report_user_event(id self, SEL _cmd, id event) {}
-
-        static IMP orig_report_debug_log = NULL;
-        static void hooked_report_debug_log(id self, SEL _cmd, id log) {}
-
-        static IMP orig_GameId = NULL;
-        static id hooked_GameId(id self, SEL _cmd) { return @"12345"; }
-
-        static IMP orig_openid = NULL;
-        static id hooked_openid(id self, SEL _cmd) { return @"dummy_openid"; }
-
-        static IMP orig_zoneid = NULL;
-        static id hooked_zoneid(id self, SEL _cmd) { return @"1"; }
-
-        static IMP orig_roomip = NULL;
-        static id hooked_roomip(id self, SEL _cmd) { return @"127.0.0.1"; }
-
-        static IMP orig_free_storage = NULL;
-        static uint64_t hooked_free_storage(id self, SEL _cmd) { return 50000000000ULL; }
-
-        static IMP orig_battery = NULL;
-        static float hooked_battery(id self, SEL _cmd) { return 1.0f; }
-
-        static IMP orig_netflow = NULL;
-        static long long hooked_netflow(id self, SEL _cmd) { return 0; }
-
-        static IMP orig_GSDKStart = NULL;
-        static void hooked_GSDKStart(id self, SEL _cmd) {}
-
-        static IMP orig_GSDKEnd = NULL;
-        static void hooked_GSDKEnd(id self, SEL _cmd) {}
-
-        static IMP orig_GSDKInnerRealTimeDetect = NULL;
-        static void hooked_GSDKInnerRealTimeDetect(id self, SEL _cmd) {}
-
-        static IMP orig_GSDKInnerSaveFPS = NULL;
-        static void hooked_GSDKInnerSaveFPS(id self, SEL _cmd, float fps) {}
-
-        static IMP orig_NotifyPufferIOSBGDownloadUpdate = NULL;
-        static void hooked_NotifyPufferIOSBGDownloadUpdate(id self, SEL _cmd, id update) {}
-
-        static IMP orig_con_timeout = NULL;
-        static double hooked_con_timeout(id self, SEL _cmd) { return 60.0; }
-
-        static IMP orig_req_timeout = NULL;
-        static double hooked_req_timeout(id self, SEL _cmd) { return 60.0; }
-
-        static IMP orig_timeoutInterval = NULL;
-        static double hooked_timeoutInterval(id self, SEL _cmd) { return 60.0; }
-
-        static IMP orig_sessionTimeoutInterval = NULL;
-        static double hooked_sessionTimeoutInterval(id self, SEL _cmd) { return 60.0; }
-
-        static IMP orig_IosBGDownload_SessionTimeout = NULL;
-        static double hooked_IosBGDownload_SessionTimeout(id self, SEL _cmd) { return 60.0; }
-
-        static IMP orig_CTIConfig_Network_NormalTimeout = NULL;
-        static double hooked_CTIConfig_Network_NormalTimeout(id self, SEL _cmd) { return 60.0; }
-
-        static IMP orig_CTIConfig_Network_ProvideTimeout = NULL;
-        static double hooked_CTIConfig_Network_ProvideTimeout(id self, SEL _cmd) { return 60.0; }
-
-        static IMP orig_startup_event_delay = NULL;
-        static double hooked_startup_event_delay(id self, SEL _cmd) { return 0.0; }
-
-        static IMP orig_expire_time = NULL;
-        static double hooked_expire_time(id self, SEL _cmd) { return 4000000000.0; }
-
-        static IMP orig_expires_in = NULL;
-        static double hooked_expires_in(id self, SEL _cmd) { return 4000000000.0; }
-
-        static IMP orig_iExpireTime = NULL;
-        static int hooked_iExpireTime(id self, SEL _cmd) { return 2147483647; }
-
-        static IMP orig_expirationDate = NULL;
-        static id hooked_expirationDate(id self, SEL _cmd) { return [NSDate dateWithTimeIntervalSinceNow:315360000]; }
-
-
-        // محرك البحث والربط التلقائي في الذاكرة
-        static void swizzleSelectorEverywhere(NSString *selName, IMP newImpl, void *origImplPrefix) {
+        # بناء محرك الربط بناءً على ملفك حصرياً (بدون تكرار أو إعادة تعريف)
+        engine = "\n\n// --- ULTIMATE DYNAMIC ENGINE ---\n"
+        engine += """
+        static void swizzleSelectorEverywhere(NSString *selName, void *newImpl, void *origImplPrefix) {
             SEL selector = NSSelectorFromString(selName);
             int numClasses = objc_getClassList(NULL, 0);
             if (numClasses > 0) {
@@ -307,164 +234,62 @@ jobs:
                 numClasses = objc_getClassList(classes, numClasses);
                 for (int i = 0; i < numClasses; i++) {
                     Class cls = classes[i];
-                    
                     Method m = class_getInstanceMethod(cls, selector);
                     if (m) {
                         IMP orig = method_getImplementation(m);
-                        if (orig != newImpl) {
+                        if (orig != (IMP)newImpl) {
                             if (origImplPrefix) { *(IMP *)origImplPrefix = orig; }
-                            method_setImplementation(m, newImpl);
+                            method_setImplementation(m, (IMP)newImpl);
                         }
                     }
-                    
                     Method mClass = class_getClassMethod(cls, selector);
                     if (mClass) {
                         IMP orig = method_getImplementation(mClass);
-                        if (orig != newImpl) {
+                        if (orig != (IMP)newImpl) {
                             if (origImplPrefix) { *(IMP *)origImplPrefix = orig; }
-                            method_setImplementation(mClass, newImpl);
+                            method_setImplementation(mClass, (IMP)newImpl);
                         }
                     }
                 }
                 free(classes);
             }
         }
+        """
 
-        __attribute__((constructor)) static void init_ultimate_bypass_engine() {
-            @autoreleasepool {
-                NSLog(@"[ShadowTrackerBypass] Loading Ultimate Native Engine...");
+        engine += "__attribute__((constructor)) static void init_ultimate_bypass_engine() {\n"
+        engine += "    @autoreleasepool {\n"
+        engine += '        NSLog(@"[ShadowTrackerBypass] Engine Starting...");\n'
 
-                // أولاً: ربط دوال الـ Objective-C ديناميكياً بالكامل داخل الذاكرة
-                swizzleSelectorEverywhere(@"integrity_detect", (IMP)hooked_integrity_detect, &orig_integrity_detect);
-                swizzleSelectorEverywhere(@"MTML_INTEGRITY_DETECT", (IMP)hooked_MTML_INTEGRITY_DETECT, &orig_MTML_INTEGRITY_DETECT);
-                swizzleSelectorEverywhere(@"advertisingIdentifier", (IMP)hooked_advertisingIdentifier, &orig_advertisingIdentifier);
-                swizzleSelectorEverywhere(@"trackingAuthorizationStatus", (IMP)hooked_trackingAuthorizationStatus, &orig_trackingAuthorizationStatus);
-                swizzleSelectorEverywhere(@"fileExistsAtPath:", (IMP)hooked_fileExistsAtPath, &orig_fileExistsAtPath);
-                swizzleSelectorEverywhere(@"fileExistsAtPath:isDirectory:", (IMP)hooked_fileExistsAtPath_isDirectory, &orig_fileExistsAtPath_isDirectory);
-                swizzleSelectorEverywhere(@"GSDKPing", (IMP)hooked_GSDKPing, &orig_GSDKPing);
-                swizzleSelectorEverywhere(@"GSDKPingDetect", (IMP)hooked_GSDKPingDetect, &orig_GSDKPingDetect);
-                swizzleSelectorEverywhere(@"GSDKRealTimeDetect", (IMP)hooked_GSDKRealTimeDetect, &orig_GSDKRealTimeDetect);
-                swizzleSelectorEverywhere(@"report_start_event:", (IMP)hooked_report_start_event, &orig_report_start_event);
-                swizzleSelectorEverywhere(@"report_system_event:", (IMP)hooked_report_system_event, &orig_report_system_event);
-                swizzleSelectorEverywhere(@"report_user_event:", (IMP)hooked_report_user_event, &orig_report_user_event);
-                swizzleSelectorEverywhere(@"report_debug_log:", (IMP)hooked_report_debug_log, &orig_report_debug_log);
-                swizzleSelectorEverywhere(@"GameId", (IMP)hooked_GameId, &orig_GameId);
-                swizzleSelectorEverywhere(@"openid", (IMP)hooked_openid, &orig_openid);
-                swizzleSelectorEverywhere(@"zoneid", (IMP)hooked_zoneid, &orig_zoneid);
-                swizzleSelectorEverywhere(@"roomip", (IMP)hooked_roomip, &orig_roomip);
-                swizzleSelectorEverywhere(@"free_storage", (IMP)hooked_free_storage, &orig_free_storage);
-                swizzleSelectorEverywhere(@"battery", (IMP)hooked_battery, &orig_battery);
-                swizzleSelectorEverywhere(@"netflow", (IMP)hooked_netflow, &orig_netflow);
-                swizzleSelectorEverywhere(@"GSDKStart", (IMP)hooked_GSDKStart, &orig_GSDKStart);
-                swizzleSelectorEverywhere(@"GSDKEnd", (IMP)hooked_GSDKEnd, &orig_GSDKEnd);
-                swizzleSelectorEverywhere(@"GSDKInnerRealTimeDetect", (IMP)hooked_GSDKInnerRealTimeDetect, &orig_GSDKInnerRealTimeDetect);
-                swizzleSelectorEverywhere(@"GSDKInnerSaveFPS:", (IMP)hooked_GSDKInnerSaveFPS, &orig_GSDKInnerSaveFPS);
-                swizzleSelectorEverywhere(@"NotifyPufferIOSBGDownloadUpdate:", (IMP)hooked_NotifyPufferIOSBGDownloadUpdate, &orig_NotifyPufferIOSBGDownloadUpdate);
-                swizzleSelectorEverywhere(@"con_timeout", (IMP)hooked_con_timeout, &orig_con_timeout);
-                swizzleSelectorEverywhere(@"req_timeout", (IMP)hooked_req_timeout, &orig_req_timeout);
-                swizzleSelectorEverywhere(@"timeoutInterval", (IMP)hooked_timeoutInterval, &orig_timeoutInterval);
-                swizzleSelectorEverywhere(@"sessionTimeoutInterval", (IMP)hooked_sessionTimeoutInterval, &orig_sessionTimeoutInterval);
-                swizzleSelectorEverywhere(@"IosBGDownload_SessionTimeout", (IMP)hooked_IosBGDownload_SessionTimeout, &orig_IosBGDownload_SessionTimeout);
-                swizzleSelectorEverywhere(@"CTIConfig_Network_NormalTimeout", (IMP)hooked_CTIConfig_Network_NormalTimeout, &orig_CTIConfig_Network_NormalTimeout);
-                swizzleSelectorEverywhere(@"CTIConfig_Network_ProvideTimeout", (IMP)hooked_CTIConfig_Network_ProvideTimeout, &orig_CTIConfig_Network_ProvideTimeout);
-                swizzleSelectorEverywhere(@"startup_event_delay", (IMP)hooked_startup_event_delay, &orig_startup_event_delay);
-                swizzleSelectorEverywhere(@"expire_time", (IMP)hooked_expire_time, &orig_expire_time);
-                swizzleSelectorEverywhere(@"expires_in", (IMP)hooked_expires_in, &orig_expires_in);
-                swizzleSelectorEverywhere(@"iExpireTime", (IMP)hooked_iExpireTime, &orig_iExpireTime);
-                swizzleSelectorEverywhere(@"expirationDate", (IMP)hooked_expirationDate, &orig_expirationDate);
+        if objc_hooks:
+            for hook in objc_hooks:
+                engine += f'        swizzleSelectorEverywhere(@"{hook}", (void *)hooked_{hook}, (void **)&orig_{hook});\n'
 
-                // ثانياً: ربط دوال لغة C الصافية (OpenSSL / RSA) باستخدام Fishhook
-                struct rebinding bindings[] = {
-                    {"AES_cbc_encrypt", (void *)hooked_AES_cbc_encrypt, (void **)&orig_AES_cbc_encrypt},
-                    {"AES_encrypt", (void *)hooked_AES_encrypt, (void **)&orig_AES_encrypt},
-                    {"AES_decrypt", (void *)hooked_AES_decrypt, (void **)&orig_AES_decrypt},
-                    {"AES_set_encrypt_key", (void *)hooked_AES_set_encrypt_key, (void **)&orig_AES_set_encrypt_key},
-                    {"AES_set_decrypt_key", (void *)hooked_AES_set_decrypt_key, (void **)&orig_AES_set_decrypt_key},
-                    {"DES_encrypt", (void *)hooked_DES_encrypt, (void **)&orig_DES_encrypt},
-                    {"DES_decrypt", (void *)hooked_DES_decrypt, (void **)&orig_DES_decrypt},
-                    {"DES_cbc_encrypt", (void *)hooked_DES_cbc_encrypt, (void **)&orig_DES_cbc_encrypt},
-                    {"DES_set_key", (void *)hooked_DES_set_key, (void **)&orig_DES_set_key},
-                    {"RSA_public_encrypt", (void *)hooked_RSA_public_encrypt, (void **)&orig_RSA_public_encrypt},
-                    {"RSA_private_decrypt", (void *)hooked_RSA_private_decrypt, (void **)&orig_RSA_private_decrypt},
-                    {"RSA_private_encrypt", (void *)hooked_RSA_private_encrypt, (void **)&orig_RSA_private_encrypt},
-                    {"RSA_public_decrypt", (void *)hooked_RSA_public_decrypt, (void **)&orig_RSA_public_decrypt},
-                    {"RSA_sign", (void *)hooked_RSA_sign, (void **)&orig_RSA_sign},
-                    {"RSA_verify", (void *)hooked_RSA_verify, (void **)&orig_RSA_verify},
-                    {"RSA_check_key", (void *)hooked_RSA_check_key, (void **)&orig_RSA_check_key},
-                    {"RSA_generate_key", (void *)hooked_RSA_generate_key, (void **)&orig_RSA_generate_key},
-                    {"RSA_padding_add_PKCS1_type_1", (void *)hooked_RSA_padding_add_PKCS1_type_1, (void **)&orig_RSA_padding_add_PKCS1_type_1},
-                    {"RSA_padding_add_PKCS1_type_2", (void *)hooked_RSA_padding_add_PKCS1_type_2, (void **)&orig_RSA_padding_add_PKCS1_type_2},
-                    {"RSA_padding_add_SSLv23", (void *)hooked_RSA_padding_add_SSLv23, (void **)&orig_RSA_padding_add_SSLv23},
-                    {"RSA_padding_add_X931", (void *)hooked_RSA_padding_add_X931, (void **)&orig_RSA_padding_add_X931},
-                    {"RSA_padding_check_PKCS1_OAEP", (void *)hooked_RSA_padding_check_PKCS1_OAEP, (void **)&orig_RSA_padding_check_PKCS1_OAEP},
-                    {"RSA_padding_check_SSLv23", (void *)hooked_RSA_padding_check_SSLv23, (void **)&orig_RSA_padding_check_SSLv23},
-                    {"rsa_cms_decrypt", (void *)hooked_rsa_cms_decrypt, (void **)&orig_rsa_cms_decrypt},
-                    {"rsa_item_verify", (void *)hooked_rsa_item_verify, (void **)&orig_rsa_item_verify},
-                    {"MD5_Init", (void *)hooked_MD5_Init, (void **)&orig_MD5_Init},
-                    {"MD5_Update", (void *)hooked_MD5_Update, (void **)&orig_MD5_Update},
-                    {"MD5_Final", (void *)hooked_MD5_Final, (void **)&orig_MD5_Final},
-                    {"SHA1_Init", (void *)hooked_SHA1_Init, (void **)&orig_SHA1_Init},
-                    {"SHA1_Update", (void *)hooked_SHA1_Update, (void **)&orig_SHA1_Update},
-                    {"SHA1_Final", (void *)hooked_SHA1_Final, (void **)&orig_SHA1_Final},
-                    {"SHA256_Init", (void *)hooked_SHA256_Init, (void **)&orig_SHA256_Init},
-                    {"SHA256_Update", (void *)hooked_SHA256_Update, (void **)&orig_SHA256_Update},
-                    {"SHA256_Final", (void *)hooked_SHA256_Final, (void **)&orig_SHA256_Final},
-                    {"SHA512_Init", (void *)hooked_SHA512_Init, (void **)&orig_SHA512_Init},
-                    {"SHA512_Update", (void *)hooked_SHA512_Update, (void **)&orig_SHA512_Update},
-                    {"SHA512_Final", (void *)hooked_SHA512_Final, (void **)&orig_SHA512_Final},
-                    {"MD5", (void *)hooked_MD5, (void **)&orig_MD5},
-                    {"HMAC_Init", (void *)hooked_HMAC_Init, (void **)&orig_HMAC_Init},
-                    {"HMAC_Update", (void *)hooked_HMAC_Update, (void **)&orig_HMAC_Update},
-                    {"HMAC_Final", (void *)hooked_HMAC_Final, (void **)&orig_HMAC_Final},
-                    {"EVP_SignFinal", (void *)hooked_EVP_SignFinal, (void **)&orig_EVP_SignFinal},
-                    {"EVP_VerifyFinal", (void *)hooked_EVP_VerifyFinal, (void **)&orig_EVP_VerifyFinal},
-                    {"EVP_DigestSign", (void *)hooked_EVP_DigestSign, (void **)&orig_EVP_DigestSign},
-                    {"EVP_DigestVerify", (void *)hooked_EVP_DigestVerify, (void **)&orig_EVP_DigestVerify},
-                    {"EVP_PKEY_sign", (void *)hooked_EVP_PKEY_sign, (void **)&orig_EVP_PKEY_sign},
-                    {"EVP_PKEY_verify", (void *)hooked_EVP_PKEY_verify, (void **)&orig_EVP_PKEY_verify},
-                    {"X509_verify_cert", (void *)hooked_X509_verify_cert, (void **)&orig_X509_verify_cert},
-                    {"X509_check_private_key", (void *)hooked_X509_check_private_key, (void **)&orig_X509_check_private_key},
-                    {"SSL_CTX_set_verify", (void *)hooked_SSL_CTX_set_verify, (void **)&orig_SSL_CTX_set_verify},
-                    {"SSL_CTX_set_cert_verify_callback", (void *)hooked_SSL_CTX_set_cert_verify_callback, (void **)&orig_SSL_CTX_set_cert_verify_callback},
-                    {"SSL_get_verify_result", (void *)hooked_SSL_get_verify_result, (void **)&orig_SSL_get_verify_result},
-                    {"SSL_read", (void *)hooked_SSL_read, (void **)&orig_SSL_read},
-                    {"SSL_write", (void *)hooked_SSL_write, (void **)&orig_SSL_write},
-                    {"X509_STORE_CTX_verify", (void *)hooked_X509_STORE_CTX_verify, (void **)&orig_X509_STORE_CTX_verify},
-                    {"SSL_set_verify", (void *)hooked_SSL_set_verify, (void **)&orig_SSL_set_verify},
-                    {"SecItemAdd", (void *)hooked_SecItemAdd, (void **)&orig_SecItemAdd},
-                    {"SecItemUpdate", (void *)hooked_SecItemUpdate, (void **)&orig_SecItemUpdate},
-                    {"SecItemCopyMatching", (void *)hooked_SecItemCopyMatching, (void **)&orig_SecItemCopyMatching},
-                    {"SecItemDelete", (void *)hooked_SecItemDelete, (void **)&orig_SecItemDelete},
-                    {"SecKeyEncrypt", (void *)hooked_SecKeyEncrypt, (void **)&orig_SecKeyEncrypt},
-                    {"SecKeyDecrypt", (void *)hooked_SecKeyDecrypt, (void **)&orig_SecKeyDecrypt},
-                    {"SecRandomCopyBytes", (void *)hooked_SecRandomCopyBytes, (void **)&orig_SecRandomCopyBytes},
-                    {"PEM_read_PrivateKey", (void *)hooked_PEM_read_PrivateKey, (void **)&orig_PEM_read_PrivateKey},
-                    {"PEM_read_PublicKey", (void *)hooked_PEM_read_PublicKey, (void **)&orig_PEM_read_PublicKey},
-                    {"PEM_write_PrivateKey", (void *)hooked_PEM_write_PrivateKey, (void **)&orig_PEM_write_PrivateKey},
-                    {"PEM_write_PublicKey", (void *)hooked_PEM_write_PublicKey, (void **)&orig_PEM_write_PublicKey},
-                    {"EVP_EncodeInit", (void *)hooked_EVP_EncodeInit, (void **)&orig_EVP_EncodeInit},
-                    {"EVP_EncodeUpdate", (void *)hooked_EVP_EncodeUpdate, (void **)&orig_EVP_EncodeUpdate},
-                    {"EVP_EncodeFinal", (void *)hooked_EVP_EncodeFinal, (void **)&orig_EVP_EncodeFinal},
-                    {"EVP_DecodeInit", (void *)hooked_EVP_DecodeInit, (void **)&orig_EVP_DecodeInit},
-                    {"EVP_DecodeUpdate", (void *)hooked_EVP_DecodeUpdate, (void **)&orig_EVP_DecodeUpdate},
-                    {"EVP_DecodeFinal", (void *)hooked_EVP_DecodeFinal, (void **)&orig_EVP_DecodeFinal},
-                    {"RAND_bytes", (void *)hooked_RAND_bytes, (void **)&orig_RAND_bytes},
-                    {"CRYPTO_memdup", (void *)hooked_CRYPTO_memdup, (void **)&orig_CRYPTO_memdup}
-                };
+        if c_hooks:
+            engine += "        struct rebinding bindings[] = {\n"
+            for hook in c_hooks:
+                engine += f'            {{"{hook}", (void *)hooked_{hook}, (void **)&orig_{hook}}},\n'
+            engine += "        };\n"
+            engine += f"        rebind_symbols(bindings, {len(c_hooks)});\n"
 
-                rebind_symbols(bindings, sizeof(bindings) / sizeof(bindings[0]));
-                NSLog(@"[ShadowTrackerBypass] All C/ObjC Functions Ready!");
-
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    Class uiClass = NSClassFromString(@"BlackUIBridge");
-                    if (uiClass) {
-                        [uiClass performSelector:@selector(showProtectionUI)];
-                    }
-                });
-            }
+        engine += """
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                Class uiClass = NSClassFromString(@"BlackUIBridge");
+                if (uiClass) {
+                    [uiClass performSelector:@selector(showProtectionUI)];
+                }
+            });
         }
-        EOF
-        echo "=== SUCCESS: Native Script Injection Complete ==="
+        }
+        """
+
+        with open("Tweak.xm", "w", encoding="utf-8") as f:
+            f.write(clean_content + engine)
+            
+        print(f"SUCCESS! Hooks routed: {len(c_hooks)} C functions -> Fishhook | {len(objc_hooks)} Obj-C functions -> Runtime Swizzling.")
+        PY_EOF
+
+        echo "=== 3. Executing Smart Parser ==="
+        python3 fix_tweak.py
 
     - name: 🛠️ Rewrite Clean Makefile
       run: |
@@ -479,7 +304,7 @@ jobs:
         LIBRARY_NAME = ShadowTrackerBypass
         ShadowTrackerBypass_FILES = Tweak.xm BlackUI.swift fishhook.c
         ShadowTrackerBypass_FRAMEWORKS = Foundation UIKit SwiftUI Security AdSupport AppTrackingTransparency
-        ShadowTrackerBypass_CFLAGS = -fobjc-arc -Wno-unused-variable -Wno-unused-function -Wno-error -Wno-mismatched-parameter-types
+        ShadowTrackerBypass_CFLAGS = -fobjc-arc -Wno-unused-variable -Wno-unused-function -Wno-error -Wno-incompatible-pointer-types -Wno-mismatched-parameter-types
         ShadowTrackerBypass_LDFLAGS = -Wl,-no_warn_inits
         
         include $(THEOS_MAKE_PATH)/library.mk
