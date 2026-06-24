@@ -177,16 +177,128 @@ jobs:
         if [ -f "Teak.xm" ]; then mv -v Teak.xm Tweak.xm; fi
         
         echo "=== 2. Smart Truncation via Pure Bash ==="
-        # حذف السطر المقطوع بأمان تام من عند EVP_PKEY_derive فما بعده
         sed -i '' '/EVP_PKEY_derive/,$d' Tweak.xm
 
-        echo "=== 3. Appending Native Obj-C Runtime Switcher ==="
+        echo "=== 3. Appending Native Obj-C Declarations & Switcher ==="
         cat << 'EOF' >> Tweak.xm
 
         #import <objc/runtime.h>
         #import <objc/message.h>
 
-        // محرك البحث الذكي لتبديل دوال الـ Objective-C تلقائياً داخل الذاكرة
+        // --- تعريف مؤشرات ومحاكاة دوال الـ Objective-C لمنع خطأ use of undeclared identifier ---
+        static IMP orig_integrity_detect = NULL;
+        static int hooked_integrity_detect(id self, SEL _cmd) { return 0; }
+
+        static IMP orig_MTML_INTEGRITY_DETECT = NULL;
+        static int hooked_MTML_INTEGRITY_DETECT(id self, SEL _cmd) { return 0; }
+
+        static IMP orig_advertisingIdentifier = NULL;
+        static id hooked_advertisingIdentifier(id self, SEL _cmd) { return nil; }
+
+        static IMP orig_trackingAuthorizationStatus = NULL;
+        static NSInteger hooked_trackingAuthorizationStatus(id self, SEL _cmd) { return 3; }
+
+        static IMP orig_fileExistsAtPath = NULL;
+        static BOOL hooked_fileExistsAtPath(id self, SEL _cmd, NSString *path) { return NO; }
+
+        static IMP orig_fileExistsAtPath_isDirectory = NULL;
+        static BOOL hooked_fileExistsAtPath_isDirectory(id self, SEL _cmd, NSString *path, BOOL *isDir) { return NO; }
+
+        static IMP orig_GSDKPing = NULL;
+        static void hooked_GSDKPing(id self, SEL _cmd) {}
+
+        static IMP orig_GSDKPingDetect = NULL;
+        static void hooked_GSDKPingDetect(id self, SEL _cmd) {}
+
+        static IMP orig_GSDKRealTimeDetect = NULL;
+        static void hooked_GSDKRealTimeDetect(id self, SEL _cmd) {}
+
+        static IMP orig_report_start_event = NULL;
+        static void hooked_report_start_event(id self, SEL _cmd, id event) {}
+
+        static IMP orig_report_system_event = NULL;
+        static void hooked_report_system_event(id self, SEL _cmd, id event) {}
+
+        static IMP orig_report_user_event = NULL;
+        static void hooked_report_user_event(id self, SEL _cmd, id event) {}
+
+        static IMP orig_report_debug_log = NULL;
+        static void hooked_report_debug_log(id self, SEL _cmd, id log) {}
+
+        static IMP orig_GameId = NULL;
+        static id hooked_GameId(id self, SEL _cmd) { return @"12345"; }
+
+        static IMP orig_openid = NULL;
+        static id hooked_openid(id self, SEL _cmd) { return @"dummy_openid"; }
+
+        static IMP orig_zoneid = NULL;
+        static id hooked_zoneid(id self, SEL _cmd) { return @"1"; }
+
+        static IMP orig_roomip = NULL;
+        static id hooked_roomip(id self, SEL _cmd) { return @"127.0.0.1"; }
+
+        static IMP orig_free_storage = NULL;
+        static uint64_t hooked_free_storage(id self, SEL _cmd) { return 50000000000ULL; }
+
+        static IMP orig_battery = NULL;
+        static float hooked_battery(id self, SEL _cmd) { return 1.0f; }
+
+        static IMP orig_netflow = NULL;
+        static long long hooked_netflow(id self, SEL _cmd) { return 0; }
+
+        static IMP orig_GSDKStart = NULL;
+        static void hooked_GSDKStart(id self, SEL _cmd) {}
+
+        static IMP orig_GSDKEnd = NULL;
+        static void hooked_GSDKEnd(id self, SEL _cmd) {}
+
+        static IMP orig_GSDKInnerRealTimeDetect = NULL;
+        static void hooked_GSDKInnerRealTimeDetect(id self, SEL _cmd) {}
+
+        static IMP orig_GSDKInnerSaveFPS = NULL;
+        static void hooked_GSDKInnerSaveFPS(id self, SEL _cmd, float fps) {}
+
+        static IMP orig_NotifyPufferIOSBGDownloadUpdate = NULL;
+        static void hooked_NotifyPufferIOSBGDownloadUpdate(id self, SEL _cmd, id update) {}
+
+        static IMP orig_con_timeout = NULL;
+        static double hooked_con_timeout(id self, SEL _cmd) { return 60.0; }
+
+        static IMP orig_req_timeout = NULL;
+        static double hooked_req_timeout(id self, SEL _cmd) { return 60.0; }
+
+        static IMP orig_timeoutInterval = NULL;
+        static double hooked_timeoutInterval(id self, SEL _cmd) { return 60.0; }
+
+        static IMP orig_sessionTimeoutInterval = NULL;
+        static double hooked_sessionTimeoutInterval(id self, SEL _cmd) { return 60.0; }
+
+        static IMP orig_IosBGDownload_SessionTimeout = NULL;
+        static double hooked_IosBGDownload_SessionTimeout(id self, SEL _cmd) { return 60.0; }
+
+        static IMP orig_CTIConfig_Network_NormalTimeout = NULL;
+        static double hooked_CTIConfig_Network_NormalTimeout(id self, SEL _cmd) { return 60.0; }
+
+        static IMP orig_CTIConfig_Network_ProvideTimeout = NULL;
+        static double hooked_CTIConfig_Network_ProvideTimeout(id self, SEL _cmd) { return 60.0; }
+
+        static IMP orig_startup_event_delay = NULL;
+        static double hooked_startup_event_delay(id self, SEL _cmd) { return 0.0; }
+
+        static IMP orig_expire_time = NULL;
+        static double hooked_expire_time(id self, SEL _cmd) { return 4000000000.0; }
+
+        static IMP orig_expires_in = NULL;
+        static double hooked_expires_in(id self, SEL _cmd) { return 4000000000.0; }
+
+        static IMP orig_iExpireTime = NULL;
+        static int hooked_iExpireTime(id self, SEL _cmd) { return 2147483647; }
+
+        static IMP orig_expirationDate = NULL;
+        static id hooked_expirationDate(id self, SEL _cmd) { return [NSDate dateWithTimeIntervalSinceNow:315360000]; }
+
+
+        // محرك البحث والربط التلقائي في الذاكرة
         static void swizzleSelectorEverywhere(NSString *selName, IMP newImpl, void *origImplPrefix) {
             SEL selector = NSSelectorFromString(selName);
             int numClasses = objc_getClassList(NULL, 0);
@@ -196,7 +308,6 @@ jobs:
                 for (int i = 0; i < numClasses; i++) {
                     Class cls = classes[i];
                     
-                    // فحص دوال الـ Instance
                     Method m = class_getInstanceMethod(cls, selector);
                     if (m) {
                         IMP orig = method_getImplementation(m);
@@ -206,7 +317,6 @@ jobs:
                         }
                     }
                     
-                    // فحص دوال الـ Class (Static)
                     Method mClass = class_getClassMethod(cls, selector);
                     if (mClass) {
                         IMP orig = method_getImplementation(mClass);
@@ -224,7 +334,7 @@ jobs:
             @autoreleasepool {
                 NSLog(@"[ShadowTrackerBypass] Loading Ultimate Native Engine...");
 
-                // أولاً: ربط دوال الـ Objective-C بالكامل ديناميكياً 100% داخل الذاكرة
+                // أولاً: ربط دوال الـ Objective-C ديناميكياً بالكامل داخل الذاكرة
                 swizzleSelectorEverywhere(@"integrity_detect", (IMP)hooked_integrity_detect, &orig_integrity_detect);
                 swizzleSelectorEverywhere(@"MTML_INTEGRITY_DETECT", (IMP)hooked_MTML_INTEGRITY_DETECT, &orig_MTML_INTEGRITY_DETECT);
                 swizzleSelectorEverywhere(@"advertisingIdentifier", (IMP)hooked_advertisingIdentifier, &orig_advertisingIdentifier);
@@ -263,7 +373,7 @@ jobs:
                 swizzleSelectorEverywhere(@"iExpireTime", (IMP)hooked_iExpireTime, &orig_iExpireTime);
                 swizzleSelectorEverywhere(@"expirationDate", (IMP)hooked_expirationDate, &orig_expirationDate);
 
-                // ثانياً: ربط دوال لغة C الصافية (OpenSSL / RSA / Network C APIs) باستخدام Fishhook
+                // ثانياً: ربط دوال لغة C الصافية (OpenSSL / RSA) باستخدام Fishhook
                 struct rebinding bindings[] = {
                     {"AES_cbc_encrypt", (void *)hooked_AES_cbc_encrypt, (void **)&orig_AES_cbc_encrypt},
                     {"AES_encrypt", (void *)hooked_AES_encrypt, (void **)&orig_AES_encrypt},
@@ -343,9 +453,8 @@ jobs:
                 };
 
                 rebind_symbols(bindings, sizeof(bindings) / sizeof(bindings[0]));
-                NSLog(@"[ShadowTrackerBypass] All C Functions Successfully Rebound via Fishhook!");
+                NSLog(@"[ShadowTrackerBypass] All C/ObjC Functions Ready!");
 
-                // ثالثاً: استدعاء واجهة Swift التفاعلية بعد ثانيتين بأمان ناتيف
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     Class uiClass = NSClassFromString(@"BlackUIBridge");
                     if (uiClass) {
